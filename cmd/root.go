@@ -1,11 +1,11 @@
 /*
-Copyright © 2024 NAME HERE <EMAIL ADDRESS>
+Copyright © 2024 Jay <jayaya369@proton.me>
 */
 package cmd
 
 import (
-	"fmt"
 	"os"
+	"seclink/log"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -16,12 +16,9 @@ var cfgFile string
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "seclink",
-	Short: "Generates secure time based links for sharing of individual files over public facing http",
-	Long: `Many cloud services provide this option, but this is a self-hosted
-	option that provides a similar functionality`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	Short: "Generates secure time based links for a level of secure sharing of individual files over public facing http",
+	Long: `Generates secure time based links for a level of secure sharing of
+	individual files over public facing http`,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -34,13 +31,13 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig, printConfig, setLogLevel)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/seclink.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is seclink.yaml in launch directory)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -49,16 +46,14 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+	l := log.Get()
+
 	if cfgFile != "" {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Find home directory.
-		home, err := os.UserHomeDir()
-		cobra.CheckErr(err)
-
 		// Search config in home directory with name "seclink" (without extension).
-		viper.AddConfigPath(home)
+		viper.AddConfigPath(".")
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("seclink")
 	}
@@ -67,6 +62,24 @@ func initConfig() {
 
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
+		l.Info().Str("ConfigFile", viper.ConfigFileUsed()).Msg("Config file used")
 	}
+}
+
+// printConfig prints the config to the output
+func printConfig() {
+	l := log.Get()
+
+	l.Info().
+		Int("LogLevel", viper.GetInt("server.loglevel")).
+		Int("Port", viper.GetInt("server.port")).
+		Str("DataPath", viper.GetString("server.datapath")).
+		Msg("Printing configuration")
+
+	log.SetLevel(viper.GetInt("server.loglevel"))
+}
+
+// setLogLevel sets the loglevel, this has to be done after the config has loaded
+func setLogLevel() {
+	log.SetLevel(viper.GetInt("server.loglevel"))
 }

@@ -1,0 +1,6 @@
+Server:
+  LogLevel: -1
+  Port: 3000
+  DataPath: /data
+Links:
+  DefaultTTL: 120 # Specified in minutes currently
