@@ -2,5 +2,6 @@ Server:
   LogLevel: -1
   Port: 3000
   DataPath: /data
+  ExternalURL: "http://localhost"
 Links:
   DefaultTTL: 120 # Specified in minutes currently
