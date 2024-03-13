@@ -69,11 +69,6 @@ func initConfig() {
 		l.Info().Str("ConfigFile", viper.ConfigFileUsed()).Msg("Config file used")
 	}
 
-	// Set defaults to specified
-	if *ttl == 0 {
-		ttlVal := viper.GetInt("links.defaultttl")
-		ttl = &ttlVal
-	}
 }
 
 // printConfig prints the config to the output

@@ -6,7 +6,8 @@ services:
     command:
       - "serve"
     ports:
-      - '3000:3000' 
+      - '3000:3000' # Web port
+      - '9000:9000' # Admin port
     networks:
       - seclink
 

@@ -1,6 +1,7 @@
 Server:
   LogLevel: -1
   Port: 3000
+  AdminPort: 9000
   DataPath: /data
   ExternalURL: "http://localhost"
 Links:

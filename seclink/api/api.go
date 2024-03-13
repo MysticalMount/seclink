@@ -30,18 +30,19 @@ type SSeclinkApi struct {
 // Starts the api server
 func (a *SSeclinkApi) Start() error {
 
-	// Create and start public API and port
+	// Public API and port
 	app := fiber.New()
-	app.Get("/:id", a.GetLink)
-	err := app.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.port")))
-	if err != nil {
-		return err
-	}
+	app.Get("/get/:id", a.GetLink)
 
-	// Create and start private admin API and port
+	// Private admin API and port
 	admin := fiber.New()
 	admin.Post("/link", a.CreateLink)
-	err = admin.Listen("0.0.0.0:9000")
+
+	// Start admin port listening, as a goroutine
+	go admin.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.adminport")))
+
+	// Start public port
+	err := app.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.port")))
 	if err != nil {
 		return err
 	}
@@ -84,6 +85,8 @@ func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
 				Msg("File does not exist")
 			return err
 		}
+
+		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Sending file for request")
 		c.SendFile(absoluteFilePath)
 
 	} else {
@@ -101,8 +104,11 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 	var input SCreateLink
 
 	if err := c.BodyParser(&input); err != nil {
+		l.Error().Err(err).Msg("Invalid input")
 		return err
 	}
+
+	l.Trace().Interface("input", input).Msg("Input")
 
 	absoluteFilePath := filepath.Join(viper.GetString("server.datapath"), input.Filepath)
 	exists, err := pathExists(absoluteFilePath)
