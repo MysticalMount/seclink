@@ -12,5 +12,6 @@ RUN addgroup seclink --gid 599 && adduser --ingroup seclink --uid 599 --shell /b
 COPY --from=builder --chown=seclink:seclink /build/seclink /seclink/seclink
 COPY seclink/seclink.yaml seclink/
 RUN chmod +x /seclink/seclink
+WORKDIR /seclink
 
 ENTRYPOINT ["/seclink/seclink"]

@@ -4,7 +4,9 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"fmt"
+	"seclink/api"
+	"seclink/db"
+	"seclink/log"
 
 	"github.com/spf13/cobra"
 )
@@ -15,20 +17,28 @@ var serveCmd = &cobra.Command{
 	Short: "Starts a seclink API server",
 	Long:  `Uses the config file seclink.yaml for settings.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("serve called")
+		Serve()
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
+}
 
-	// Here you will define your flags and configuration settings.
+func Serve() error {
+	l := log.Get()
+	db := db.NewSeclinkDb()
+	err := db.Start(false, false)
+	if err != nil {
+		l.Error().Err(err).Msg("An error occurred opening the database")
+		return err
+	}
+	api := api.NewSeclinkApi(db)
+	err = api.Start()
+	if err != nil {
+		l.Error().Err(err).Msg("An error occurred starting the API")
+		return err
+	}
+	return nil
 
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// serveCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// serveCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }

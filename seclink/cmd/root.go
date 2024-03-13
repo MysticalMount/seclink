@@ -11,7 +11,11 @@ import (
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile  string
+	filePath *string
+	ttl      *int
+)
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -52,8 +56,8 @@ func initConfig() {
 		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Search config in home directory with name "seclink" (without extension).
-		viper.AddConfigPath(".")
+		// Search config in app directory
+		viper.AddConfigPath("/seclink")
 		viper.SetConfigType("yaml")
 		viper.SetConfigName("seclink")
 	}
@@ -63,6 +67,12 @@ func initConfig() {
 	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		l.Info().Str("ConfigFile", viper.ConfigFileUsed()).Msg("Config file used")
+	}
+
+	// Set defaults to specified
+	if *ttl == 0 {
+		ttlVal := viper.GetInt("links.defaultttl")
+		ttl = &ttlVal
 	}
 }
 
@@ -74,6 +84,7 @@ func printConfig() {
 		Int("LogLevel", viper.GetInt("server.loglevel")).
 		Int("Port", viper.GetInt("server.port")).
 		Str("DataPath", viper.GetString("server.datapath")).
+		Int("DefaultTTL", viper.GetInt("links.defaultttl")).
 		Msg("Printing configuration")
 
 	log.SetLevel(viper.GetInt("server.loglevel"))
