@@ -86,8 +86,8 @@ func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
 			return err
 		}
 
-		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Sending file for request")
-		c.SendFile(absoluteFilePath)
+		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Downloading file")
+		c.Download(absoluteFilePath, string(filePath))
 
 	} else {
 		l.Error().

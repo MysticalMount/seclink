@@ -2,7 +2,6 @@ FROM golang:1.22.1-alpine3.19 AS builder
 
 COPY seclink/ /build/
 WORKDIR /build
-RUN go mod download
 RUN go build -v .
 
 FROM alpine:3.19 AS runner
