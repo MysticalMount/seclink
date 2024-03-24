@@ -2,6 +2,8 @@ FROM golang:1.22.1-alpine3.19 AS builder
 
 COPY seclink/ /build/
 WORKDIR /build
+RUN go env -w GOPROXY='https://nexus.int.keepclm.com/repository/go-proxy' && \
+    go env -w GOSUM='https://nexus.int.keepclm.com/repository/go-sum'
 RUN go build -v .
 
 FROM alpine:3.19 AS runner
