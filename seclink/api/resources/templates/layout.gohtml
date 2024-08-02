@@ -1,0 +1,23 @@
+{{- define "header" }}
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Seclink</title>
+    <link href="/static/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <script src="/static/bootstrap.bundle.min.js"></script>
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/json-enc.js"></script>
+  <body>
+    <h3>
+        Seclink
+        <small class="text-muted">Secure sharing of time based links</small>
+    </h3>
+{{- end -}}
+
+{{- define "footer" }}
+</body>
+</html>
+{{- end -}}

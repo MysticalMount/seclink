@@ -1,8 +1,10 @@
 package api
 
 import (
+	"embed"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"seclink/db"
@@ -10,13 +12,19 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/gofiber/template/html/v2"
 	"github.com/mazen160/go-random"
 	"github.com/spf13/viper"
 )
 
+//go:embed resources/*
+var res embed.FS
+
 type SCreateLink struct {
-	Filepath string `json:"filepath"`
-	Ttl      int32  `json:"ttl,omitempty"`
+	Filepath  string        `json:"path"`
+	TtlString string        `json:"ttl"`
+	Ttl       time.Duration `json:"-"`
 }
 
 type ISeclinkApi interface {
@@ -30,13 +38,23 @@ type SSeclinkApi struct {
 // Starts the api server
 func (a *SSeclinkApi) Start() error {
 
+	// Prepare HTML template rendering system from embedded resources
+	httpFS := http.FS(res)
+	engine := html.NewFileSystem(httpFS, ".gohtml")
+
 	// Public API and port
 	app := fiber.New()
 	app.Get("/get/:id", a.GetLink)
 
 	// Private admin API and port
-	admin := fiber.New()
-	admin.Post("/link", a.CreateLink)
+	admin := fiber.New(fiber.Config{Views: engine}) // Ensure we load the HTML template rendering engine
+	admin.Use("/static", filesystem.New(filesystem.Config{
+		Root:       httpFS,
+		PathPrefix: "resources/static",
+		Browse:     true,
+	}))
+	admin.Get("/", a.AdminUI)
+	admin.Post("/links/share", a.CreateLink)
 
 	// Start admin port listening, as a goroutine
 	go admin.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.adminport")))
@@ -102,9 +120,20 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 	l := log.Get()
 
 	var input SCreateLink
+	var err error
 
 	if err := c.BodyParser(&input); err != nil {
 		l.Error().Err(err).Msg("Invalid input")
+		return err
+	}
+
+	// Convert TTL string to time.Duration
+	input.Ttl, err = time.ParseDuration(input.TtlString)
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("ttlstring", input.TtlString).
+			Msg("Could not convert time string to duration")
 		return err
 	}
 
@@ -125,7 +154,7 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 		}
 		l.Info().Str("id", id).Msg("Generated ID")
 
-		err = a.db.Set([]byte(id), []byte(input.Filepath), time.Duration(input.Ttl)*time.Minute)
+		err = a.db.Set([]byte(id), []byte(input.Filepath), input.Ttl)
 
 		if err != nil {
 			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred inserting a record")
@@ -144,6 +173,48 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 func GenerateLink() (string, error) {
 	data, err := random.String(64)
 	return data, err
+}
+
+// Returns a list of relative filenames from the data directory, excludes db folder
+func GetFileList() ([]SFile, error) {
+	var files []SFile
+	err := filepath.Walk(viper.GetString("server.datapath"), func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			files = append(files, SFile{Path: path, TtlString: viper.GetDuration("links.defaultttl").String()})
+		}
+		return nil
+	})
+	return files, err
+}
+
+// If link exists and has not expired then return downloaded file
+func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
+	l := log.Get()
+	var err error
+
+	l.Trace().Msg("Root page called")
+
+	sharedLinks := []SSharedLink{{
+		Path:      "hello.txt",
+		Url:       viper.GetString("server.externalurl"),
+		TtlString: "2h",
+	}}
+
+	files, err := GetFileList()
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("datapath", viper.GetString("server.datapath")).
+			Msg("Could not list files in data path")
+		return err
+	}
+
+	data := SUiData{
+		SharedLinks: sharedLinks,
+		Files:       files,
+	}
+
+	return c.Render("root", data)
 }
 
 // New Seclink API

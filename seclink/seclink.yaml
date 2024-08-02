@@ -3,6 +3,6 @@ Server:
   Port: 3000
   AdminPort: 9000
   DataPath: /data
-  ExternalURL: "http://localhost"
+  ExternalURL: "http://10.10.40.20:3000"
 Links:
-  DefaultTTL: 120 # Specified in minutes currently
+  DefaultTTL: 2h

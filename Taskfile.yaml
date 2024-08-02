@@ -1,0 +1,28 @@
+# https://taskfile.dev
+
+version: '3'
+
+tasks:
+  # Container commands
+  restart:
+    desc: Restarts the service
+    cmds:
+    - task: down
+    - task: up
+  up:
+    desc: Brings the service up
+    cmds:
+    - docker compose up -d --build
+  down:
+    desc: Brings the service down
+    cmds:
+    - docker compose down
+  ps:
+    desc: Lists current status of services
+    cmds:
+    - docker compose ps --all
+  logs:
+    desc: Shows logs for the seclink service'
+    cmds:
+    - docker compose logs seclink
+  

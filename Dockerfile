@@ -4,7 +4,7 @@ COPY seclink/ /build/
 WORKDIR /build
 RUN go env -w GOPROXY='https://nexus.int.keepclm.com/repository/go-proxy' && \
     go env -w 'GOSUMDB=sum.golang.org https://nexus.int.keepclm.com/repository/go-sum'
-RUN go build -v .
+RUN --mount=type=cache,id=gocache,target=/gocache,rw GOCACHE=/gocache go build -v .
 
 FROM alpine:3.19 AS runner
 
