@@ -180,7 +180,11 @@ func GetFileList() ([]SFile, error) {
 	var files []SFile
 	err := filepath.Walk(viper.GetString("server.datapath"), func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
-			files = append(files, SFile{Path: path, TtlString: viper.GetDuration("links.defaultttl").String()})
+			// Get relative path
+			relPath, err := filepath.Rel(viper.GetString("server.datapath"), path)
+			if err == nil {
+				files = append(files, SFile{Path: relPath, TtlString: viper.GetDuration("links.defaultttl").String()})
+			}
 		}
 		return nil
 	})
