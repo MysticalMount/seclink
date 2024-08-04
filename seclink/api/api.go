@@ -11,8 +11,10 @@ import (
 	"seclink/log"
 	"time"
 
+	"github.com/gofiber/contrib/fiberzerolog"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/gofiber/template/html/v2"
 	"github.com/mazen160/go-random"
 	"github.com/spf13/viper"
@@ -32,11 +34,14 @@ type ISeclinkApi interface {
 }
 
 type SSeclinkApi struct {
-	db db.ISeclinkDb
+	db            db.ISeclinkDb
+	dataFilesPath string // The root data path is stored globally, but the files sub-folder is a constant, this stores that path so we dont have to repeatedly determine the sub-folder
 }
 
 // Starts the api server
 func (a *SSeclinkApi) Start() error {
+
+	l := log.Get()
 
 	// Prepare HTML template rendering system from embedded resources
 	httpFS := http.FS(res)
@@ -44,17 +49,27 @@ func (a *SSeclinkApi) Start() error {
 
 	// Public API and port
 	app := fiber.New()
-	app.Get("/get/:id", a.GetLink)
+	app.Use(fiberzerolog.New(fiberzerolog.Config{
+		Logger: &l,
+	}))
+	app.Use(recover.New())
+	app.Get("/links/:id", a.GetLink)
 
 	// Private admin API and port
-	admin := fiber.New(fiber.Config{Views: engine}) // Ensure we load the HTML template rendering engine
+	// TODO: Make the BodyLimit in MB a configurable option
+	admin := fiber.New(fiber.Config{Views: engine, BodyLimit: 2000 * 1024 * 1024}) // Ensure we load the HTML template rendering engine
 	admin.Use("/static", filesystem.New(filesystem.Config{
 		Root:       httpFS,
 		PathPrefix: "resources/static",
 		Browse:     true,
 	}))
-	admin.Get("/", a.AdminUI)
-	admin.Post("/links/share", a.CreateLink)
+	admin.Use(fiberzerolog.New(fiberzerolog.Config{
+		Logger: &l,
+	}))
+	app.Use(recover.New())
+	admin.Get("/admin", a.AdminUI)
+	admin.Post("/api/v1/links/share", a.CreateLink)
+	admin.Post("/api/v1/files/upload", a.UploadFile)
 
 	// Start admin port listening, as a goroutine
 	go admin.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.adminport")))
@@ -86,7 +101,7 @@ func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
 		}
 
 		// Check the file exists
-		absoluteFilePath := filepath.Join(viper.GetString("server.datapath"), string(filePath))
+		absoluteFilePath := filepath.Join(a.dataFilesPath, string(filePath))
 		exists, err := pathExists(absoluteFilePath)
 		if err != nil {
 			l.Error().
@@ -139,7 +154,7 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 
 	l.Trace().Interface("input", input).Msg("Input")
 
-	absoluteFilePath := filepath.Join(viper.GetString("server.datapath"), input.Filepath)
+	absoluteFilePath := filepath.Join(a.dataFilesPath, input.Filepath)
 	exists, err := pathExists(absoluteFilePath)
 	if err != nil {
 		l.Error().Err(err).Str("FilePath", input.Filepath).Msg("An error occurred determining if filepath exists")
@@ -166,7 +181,13 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 		return fmt.Errorf("file does not exist")
 	}
 
-	return nil
+	data, err := a.GetUiData()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get required ui data")
+		return err
+	}
+
+	return c.Render("sharedLinksTable", data)
 
 }
 
@@ -176,12 +197,12 @@ func GenerateLink() (string, error) {
 }
 
 // Returns a list of relative filenames from the data directory, excludes db folder
-func GetFileList() ([]SFile, error) {
+func (a *SSeclinkApi) GetFileList() ([]SFile, error) {
 	var files []SFile
-	err := filepath.Walk(viper.GetString("server.datapath"), func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(a.dataFilesPath, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() {
 			// Get relative path
-			relPath, err := filepath.Rel(viper.GetString("server.datapath"), path)
+			relPath, err := filepath.Rel(a.dataFilesPath, path)
 			if err == nil {
 				files = append(files, SFile{Path: relPath, TtlString: viper.GetDuration("links.defaultttl").String()})
 			}
@@ -191,6 +212,15 @@ func GetFileList() ([]SFile, error) {
 	return files, err
 }
 
+// Get active links list
+func (a *SSeclinkApi) GetLinks() ([]db.SSharedLink, error) {
+	results, err := a.db.GetAllLinks()
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 // If link exists and has not expired then return downloaded file
 func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 	l := log.Get()
@@ -198,32 +228,94 @@ func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 
 	l.Trace().Msg("Root page called")
 
-	sharedLinks := []SSharedLink{{
-		Path:      "hello.txt",
-		Url:       viper.GetString("server.externalurl"),
-		TtlString: "2h",
-	}}
-
-	files, err := GetFileList()
+	data, err := a.GetUiData()
 	if err != nil {
-		l.Error().
-			Err(err).
-			Str("datapath", viper.GetString("server.datapath")).
-			Msg("Could not list files in data path")
+		l.Error().Err(err).Msg("failed to get required ui data")
 		return err
-	}
-
-	data := SUiData{
-		SharedLinks: sharedLinks,
-		Files:       files,
 	}
 
 	return c.Render("root", data)
 }
 
+func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
+	l := log.Get()
+
+	l.Trace().Msg("UploadFile called")
+
+	file, err := c.FormFile("binaryFile")
+
+	// Check for errors:
+	if err == nil {
+		savePath := filepath.Join(a.dataFilesPath, file.Filename)
+		l.Info().
+			Str("savePath", savePath).
+			Str("Filename", file.Filename).
+			Msg("file upload successful, saving file")
+		// 👷 Save file to root directory:
+		err = c.SaveFile(file, savePath)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("savePath", savePath).
+				Str("Filename", file.Filename).
+				Msg("failed to save file to the save path")
+			return err
+		}
+	} else {
+		l.Error().
+			Err(err).
+			Str("Filename", file.Filename).
+			Msg("failed to upload file")
+		return err
+	}
+
+	err = c.SendString("File upload successful!")
+	if err != nil {
+		return err
+	}
+
+	data, err := a.GetUiData()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get required ui data")
+		return err
+	}
+
+	return c.Render("fileTable", data)
+}
+
+// Get all current data on the app, used for rendering UI pages
+func (a *SSeclinkApi) GetUiData() (SUiData, error) {
+
+	l := log.Get()
+
+	sharedLinks, err := a.GetLinks()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get links from db")
+		return SUiData{}, err
+	}
+
+	files, err := a.GetFileList()
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("datapath", a.dataFilesPath).
+			Msg("Could not list files in data path")
+		return SUiData{}, err
+	}
+
+	return SUiData{
+		SharedLinks: sharedLinks,
+		Files:       files,
+	}, nil
+
+}
+
 // New Seclink API
 func NewSeclinkApi(db db.ISeclinkDb) ISeclinkApi {
-	return &SSeclinkApi{db: db}
+	return &SSeclinkApi{
+		db:            db,
+		dataFilesPath: filepath.Join(viper.GetString("server.datapath"), "files"),
+	}
 }
 
 // Path exists

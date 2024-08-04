@@ -4,10 +4,11 @@ go 1.22.0
 
 require (
 	github.com/dgraph-io/badger/v4 v4.2.0
-	github.com/gofiber/fiber/v2 v2.52.2
+	github.com/gofiber/contrib/fiberzerolog v1.0.2
+	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/gofiber/template/html/v2 v2.1.2
 	github.com/mazen160/go-random v0.0.0-20210308102632-d2b501c85c03
-	github.com/rs/zerolog v1.32.0
+	github.com/rs/zerolog v1.33.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 )

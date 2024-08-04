@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"path/filepath"
 	"seclink/log"
 	"time"
@@ -13,6 +14,7 @@ type ISeclinkDb interface {
 	Start(lock bool, ro bool) error
 	Get([]byte) ([]byte, error)
 	Set([]byte, []byte, time.Duration) error
+	GetAllLinks() ([]SSharedLink, error)
 	Close() error
 }
 
@@ -91,6 +93,49 @@ func (d *SSeclinkDb) Set(key []byte, val []byte, ttl time.Duration) error {
 		return err
 	})
 	return err
+}
+
+// Gets all keys in the db
+func (d *SSeclinkDb) GetAllLinks() ([]SSharedLink, error) {
+	//l := log.Get()
+
+	results := make([]SSharedLink, 0)
+
+	err := d.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchSize = 10
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			newResult := SSharedLink{}
+			item := it.Item()
+			k := item.Key()
+
+			// Get timestamp
+			expiresAt := time.Unix(int64(item.ExpiresAt()), 0)
+			newResult.ExpiresAt = expiresAt
+			newResult.Ttl = time.Duration(time.Since(expiresAt))
+			newResult.TtlString = newResult.Ttl.String()
+
+			// l.Trace().Time("expiresAt", expiresAt).Msg("trace log for record expiration")
+
+			err := item.Value(func(v []byte) error {
+				newResult.Id = string(k)
+				newResult.Path = string(v)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
+			// Formulate external URL
+			newResult.Url = fmt.Sprintf("%s/links/%s", viper.GetString("server.externalurl"), newResult.Id)
+
+			results = append(results, newResult)
+		}
+		return nil
+	})
+	return results, err
 }
 
 // New Seclink DB

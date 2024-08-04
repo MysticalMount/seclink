@@ -1,14 +1,10 @@
 package api
 
-type SUiData struct {
-	SharedLinks []SSharedLink
-	Files       []SFile
-}
+import "seclink/db"
 
-type SSharedLink struct {
-	Path      string
-	Url       string
-	TtlString string
+type SUiData struct {
+	SharedLinks []db.SSharedLink
+	Files       []SFile
 }
 
 type SFile struct {

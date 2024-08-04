@@ -12,7 +12,7 @@
   {{- range .SharedLinks -}}
     <tr>
       <td>{{ .Path }}</td>
-      <td>{{ .Url }}</td>
+      <td><a href="{{ .Url }}">{{ .Url }}</a></td>
       <td>{{ .TtlString }}</td>
     </tr>
   {{- end -}}
@@ -37,18 +37,31 @@
     <tr>
       <td><input type="hidden" class="row{{ $i }}-input" name="path" value="{{ $f.Path }}"/>{{ $f.Path }}</td>
       <td><input type="text" class="row{{ $i }}-input" name="ttl" value="{{ $f.TtlString }}"/></td>
-      <td><button hx-post="/links/share"  hx-target="#row{{ $i }}-response" hx-include=".row{{ $i }}-input" hx-ext="json-enc">Share</button></td>
+      <td><button hx-post="/api/v1/links/share"  hx-target="#sharedLinksTable" hx-include=".row{{ $i }}-input" hx-ext="json-enc">Share</button></td>
       <td>Delete</td>
-      <td><div id="row{{ $i }}-response"></div></td>
     </tr>
   {{- end -}}
   </tbody>
 </table>
 {{- end -}}
 
+{{- define "uploadForm" -}}
+<h4>Upload</h4>
+<form id="binaryForm" enctype="multipart/form-data">
+  <input type="file" name="binaryFile">
+  <button hx-post="/api/v1/files/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#fileTable">Upload</button>
+</form>
+<div id="upload-result"></div>
+{{- end -}}
+
 {{- define "root" -}}
 {{- template "header" . -}}
+<div id="sharedLinksTable">
 {{- template "sharedLinksTable" . -}}
+</div>
+<div id="fileTable">
 {{- template "fileTable" . -}}
+</div>
+{{- template "uploadForm" . -}}
 {{- template "footer" . -}}
 {{- end -}}

@@ -4,7 +4,9 @@ Copyright © 2024 Jay <jayaya369@proton.me>
 package cmd
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"seclink/log"
 
 	"github.com/rs/zerolog"
@@ -36,7 +38,7 @@ func Execute() {
 }
 
 func init() {
-	cobra.OnInitialize(initLog, initConfig, printConfig)
+	cobra.OnInitialize(initLog, initConfig, printConfig, initPath)
 
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
@@ -85,7 +87,40 @@ func printConfig() {
 		Int("Port", viper.GetInt("server.port")).
 		Int("AdminPort", viper.GetInt("server.adminport")).
 		Str("DataPath", viper.GetString("server.datapath")).
-		Str("ExternalURL", viper.GetString("server.datapath")).
+		Str("ExternalURL", viper.GetString("server.externalurl")).
 		Str("DefaultTTL", viper.GetDuration("links.defaultttl").String()).
 		Msg("Printing configuration")
+}
+
+// initPath sets up the data directory, if it doesnt already exist, as well as the files subfolder
+func initPath() {
+
+	dataFilepath := filepath.Join(viper.GetString("server.datapath"), "files")
+
+	// Does data path and sub-folder files exist?
+	if exists, _ := pathExists(dataFilepath); !exists {
+		l.Info().
+			Str("datafilepath", dataFilepath).
+			Msg("the files sub-directory and/or data path does not exist, attempting to create")
+		err := os.MkdirAll(dataFilepath, 0700)
+		if err != nil {
+			l.Fatal().
+				Err(err).
+				Str("datafilepath", dataFilepath).
+				Msg("error creating data path and files sub directory")
+		}
+	}
+
+}
+
+// Path exists
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
