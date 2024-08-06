@@ -51,7 +51,6 @@
   <input type="file" name="binaryFile">
   <button hx-post="/api/v1/files/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#fileTable">Upload</button>
 </form>
-<div id="upload-result"></div>
 {{- end -}}
 
 {{- define "root" -}}

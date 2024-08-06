@@ -11,11 +11,12 @@ import (
 	"seclink/log"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/gofiber/contrib/fiberzerolog"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/gofiber/template/html/v2"
 	"github.com/mazen160/go-random"
 	"github.com/spf13/viper"
 )
@@ -45,7 +46,6 @@ func (a *SSeclinkApi) Start() error {
 
 	// Prepare HTML template rendering system from embedded resources
 	httpFS := http.FS(res)
-	engine := html.NewFileSystem(httpFS, ".gohtml")
 
 	// Public API and port
 	app := fiber.New()
@@ -57,7 +57,7 @@ func (a *SSeclinkApi) Start() error {
 
 	// Private admin API and port
 	// TODO: Make the BodyLimit in MB a configurable option
-	admin := fiber.New(fiber.Config{Views: engine, BodyLimit: 2000 * 1024 * 1024}) // Ensure we load the HTML template rendering engine
+	admin := fiber.New(fiber.Config{BodyLimit: 2000 * 1024 * 1024}) // Ensure we load the HTML template rendering engine
 	admin.Use("/static", filesystem.New(filesystem.Config{
 		Root:       httpFS,
 		PathPrefix: "resources/static",
@@ -187,7 +187,7 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.Render("sharedLinksTable", data)
+	return a.Render(c, AdminSharedLinksTable(data.SharedLinks))
 
 }
 
@@ -234,7 +234,7 @@ func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.Render("root", data)
+	return a.Render(c, AdminUiPage(data.SharedLinks, data.Files))
 }
 
 func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
@@ -280,7 +280,7 @@ func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
 		return err
 	}
 
-	return c.Render("fileTable", data)
+	return a.Render(c, AdminFileTable(data.Files))
 }
 
 // Get all current data on the app, used for rendering UI pages
@@ -308,6 +308,14 @@ func (a *SSeclinkApi) GetUiData() (SUiData, error) {
 		Files:       files,
 	}, nil
 
+}
+
+func (a *SSeclinkApi) Render(c *fiber.Ctx, component templ.Component, options ...func(*templ.ComponentHandler)) error {
+	componentHandler := templ.Handler(component)
+	for _, o := range options {
+		o(componentHandler)
+	}
+	return adaptor.HTTPHandler(componentHandler)(c)
 }
 
 // New Seclink API

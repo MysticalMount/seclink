@@ -1,0 +1,95 @@
+package api
+
+import (
+	"seclink/db"
+	"fmt"
+)
+
+templ AdminLayout() {
+	<!doctype html>
+	<html lang="en" data-bs-theme="dark">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Seclink</title>
+		<link href="/static/bootstrap.min.css" rel="stylesheet">
+	</head>
+	<script src="/static/bootstrap.bundle.min.js"></script>
+	<script src="/static/htmx.min.js"></script>
+	<script src="/static/json-enc.js"></script>
+	<body>
+		<h3>
+			Seclink
+			<small class="text-muted">Secure sharing of time based links</small>
+		</h3>
+		{ children... }
+	</body>
+	</html>
+}
+
+templ AdminSharedLinksTable(sharedLinks []db.SSharedLink) {
+	<h4>Active links</h4>
+	<table class="table">
+	<thead>
+		<tr>
+		<th>Path</th>
+		<th>URL</th>
+		<th>TTL</th>
+		</tr>
+	</thead>
+	<tbody>
+	for _, sharedLink := range sharedLinks {
+		<tr>
+		<td>{ sharedLink.Path }</td>
+		<td><a href={ templ.URL(sharedLink.Url) }>{ sharedLink.Url }</a></td>
+		<td>{ sharedLink.TtlString }</td>
+		</tr>
+	}
+	</tbody> 
+	</table>
+}
+
+templ AdminFileTable(files []SFile) {
+	<h4>Files</h4>
+	<table class="table">
+	<thead>
+		<tr>
+		<th>Path</th>
+		<th>TTL</th>
+		<th></th>
+		<th></th>
+		<th></th>
+		</tr>
+	</thead>
+	<tbody>
+	for index, file := range files {
+		<tr>
+		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="path" value={ file.Path }/>{ file.Path }</td>
+		<td><input type="text" class={ fmt.Sprintf("row%d-input", index) } name="ttl" value={ file.TtlString }/></td>
+		<td><button hx-post="/api/v1/links/share"  hx-target="#sharedLinksTable" hx-include={ fmt.Sprintf(".row%d-input", index) } hx-ext="json-enc">Share</button></td>
+		<td>Delete</td>
+		</tr>
+	}
+	</tbody>
+	</table>
+}
+
+templ AdminUploadFileForm() {
+	<h4>Upload</h4>
+	<form id="binaryForm" enctype="multipart/form-data">
+	<input type="file" name="binaryFile">
+	<button hx-post="/api/v1/files/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#fileTable">Upload</button>
+	</form>
+}
+
+templ AdminUiPage(sharedLinks []db.SSharedLink, files []SFile) {
+	@AdminLayout() {
+		<div id="sharedLinksTable">
+		@AdminSharedLinksTable(sharedLinks)
+		</div>
+		<div id="fileTable">
+		@AdminFileTable(files)
+		</div>
+		@AdminUploadFileForm()
+	}
+}
