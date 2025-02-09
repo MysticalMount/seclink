@@ -3,6 +3,7 @@ package api
 import (
 	"seclink/db"
 	"fmt"
+	"strconv"
 )
 
 templ AdminLayout() {
@@ -27,22 +28,20 @@ templ AdminLayout() {
 	</html>
 }
 
-templ AdminSharedLinksTable(sharedLinks []db.SSharedLink) {
+templ AdminLinksTable(links []db.Link) {
 	<h4>Active links</h4>
 	<table class="table">
 	<thead>
 		<tr>
-		<th>Path</th>
-		<th>URL</th>
-		<th>TTL</th>
+		<th>Page</th>
+		<th>Expires</th>
 		</tr>
 	</thead>
 	<tbody>
-	for _, sharedLink := range sharedLinks {
+	for _, link := range links {
 		<tr>
-		<td>{ sharedLink.Path }</td>
-		<td><a href={ templ.URL(sharedLink.Url) }>{ sharedLink.Url }</a></td>
-		<td>{ sharedLink.TtlString }</td>
+		<td>{ link.PostName }</td>
+		<td>{{ strExpires := strconv.FormatInt(link.Expires, 10)}}{ strExpires }</td>
 		</tr>
 	}
 	</tbody> 
@@ -66,7 +65,7 @@ templ AdminFileTable(files []SFile) {
 		<tr>
 		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="path" value={ file.Path }/>{ file.Path }</td>
 		<td><input type="text" class={ fmt.Sprintf("row%d-input", index) } name="ttl" value={ file.TtlString }/></td>
-		<td><button hx-post="/api/v1/links/share"  hx-target="#sharedLinksTable" hx-include={ fmt.Sprintf(".row%d-input", index) } hx-ext="json-enc">Share</button></td>
+		<td><button hx-post="/api/v1/links/share"  hx-target="#linksTable" hx-include={ fmt.Sprintf(".row%d-input", index) } hx-ext="json-enc">Share</button></td>
 		<td>Delete</td>
 		</tr>
 	}
@@ -82,10 +81,10 @@ templ AdminUploadFileForm() {
 	</form>
 }
 
-templ AdminUiPage(sharedLinks []db.SSharedLink, files []SFile) {
+templ AdminUiPage(links []db.Link, files []SFile) {
 	@AdminLayout() {
-		<div id="sharedLinksTable">
-		@AdminSharedLinksTable(sharedLinks)
+		<div id="linksTable">
+		@AdminLinksTable(links)
 		</div>
 		<div id="fileTable">
 		@AdminFileTable(files)

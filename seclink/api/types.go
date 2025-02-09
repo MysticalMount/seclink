@@ -3,7 +3,7 @@ package api
 import "seclink/db"
 
 type SUiData struct {
-	SharedLinks []db.SSharedLink
+	SharedLinks []db.Link
 	Files       []SFile
 }
 

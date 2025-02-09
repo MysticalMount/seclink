@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -213,8 +214,9 @@ func (a *SSeclinkApi) GetFileList() ([]SFile, error) {
 }
 
 // Get active links list
-func (a *SSeclinkApi) GetLinks() ([]db.SSharedLink, error) {
-	results, err := a.db.GetAllLinks()
+func (a *SSeclinkApi) GetLinks() ([]db.Link, error) {
+	ctx := context.Background()
+	results, err := a.db.Queries().GetAllLinks(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -1,9 +1,11 @@
 module seclink
 
-go 1.22.5
+go 1.23
+
+toolchain go1.23.4
 
 require (
-	github.com/a-h/templ v0.2.747
+	github.com/a-h/templ v0.3.833
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/gofiber/contrib/fiberzerolog v1.0.2
