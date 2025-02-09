@@ -53,7 +53,7 @@ func (a *SSeclinkApi) Start() error {
 		Logger: &l,
 	}))
 	app.Use(recover.New())
-	app.Get("/links/:id", a.GetLink)
+	// app.Get("/links/:id", a.GetLink)
 
 	// Private admin API and port
 	// TODO: Make the BodyLimit in MB a configurable option
@@ -68,7 +68,7 @@ func (a *SSeclinkApi) Start() error {
 	}))
 	app.Use(recover.New())
 	admin.Get("/admin", a.AdminUI)
-	admin.Post("/api/v1/links/share", a.CreateLink)
+	// admin.Post("/api/v1/links/share", a.CreateLink)
 	admin.Post("/api/v1/files/upload", a.UploadFile)
 
 	// Start admin port listening, as a goroutine
@@ -84,112 +84,112 @@ func (a *SSeclinkApi) Start() error {
 
 }
 
-// If link exists and has not expired then return downloaded file
-func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
-	l := log.Get()
+// // If link exists and has not expired then return downloaded file
+// func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
+// 	l := log.Get()
 
-	if id := c.Params("id"); id != "" {
+// 	if id := c.Params("id"); id != "" {
 
-		// See if the ID exists in the database
-		filePath, err := a.db.Get([]byte(id))
-		if err != nil {
-			l.Error().
-				Err(err).
-				Str("ID", id).
-				Msg("Could not find id in database")
-			return err
-		}
+// 		// See if the ID exists in the database
+// 		filePath, err := a.db.Get([]byte(id))
+// 		if err != nil {
+// 			l.Error().
+// 				Err(err).
+// 				Str("ID", id).
+// 				Msg("Could not find id in database")
+// 			return err
+// 		}
 
-		// Check the file exists
-		absoluteFilePath := filepath.Join(a.dataFilesPath, string(filePath))
-		exists, err := pathExists(absoluteFilePath)
-		if err != nil {
-			l.Error().
-				Err(err).
-				Str("ID", id).
-				Str("AbsoluteFilePath", absoluteFilePath).
-				Msg("Error occurred checking if file exists")
-			return err
-		}
-		if !exists {
-			l.Error().
-				Str("ID", id).
-				Str("AbsoluteFilePath", absoluteFilePath).
-				Msg("File does not exist")
-			return err
-		}
+// 		// Check the file exists
+// 		absoluteFilePath := filepath.Join(a.dataFilesPath, string(filePath))
+// 		exists, err := pathExists(absoluteFilePath)
+// 		if err != nil {
+// 			l.Error().
+// 				Err(err).
+// 				Str("ID", id).
+// 				Str("AbsoluteFilePath", absoluteFilePath).
+// 				Msg("Error occurred checking if file exists")
+// 			return err
+// 		}
+// 		if !exists {
+// 			l.Error().
+// 				Str("ID", id).
+// 				Str("AbsoluteFilePath", absoluteFilePath).
+// 				Msg("File does not exist")
+// 			return err
+// 		}
 
-		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Downloading file")
-		c.Download(absoluteFilePath, string(filePath))
+// 		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Downloading file")
+// 		c.Download(absoluteFilePath, string(filePath))
 
-	} else {
-		l.Error().
-			Msg("An empty id was provided on the route")
-		return fmt.Errorf("an empty id was provided on the route")
-	}
+// 	} else {
+// 		l.Error().
+// 			Msg("An empty id was provided on the route")
+// 		return fmt.Errorf("an empty id was provided on the route")
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
-	l := log.Get()
+// func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
+// 	l := log.Get()
 
-	var input SCreateLink
-	var err error
+// 	var input SCreateLink
+// 	var err error
 
-	if err := c.BodyParser(&input); err != nil {
-		l.Error().Err(err).Msg("Invalid input")
-		return err
-	}
+// 	if err := c.BodyParser(&input); err != nil {
+// 		l.Error().Err(err).Msg("Invalid input")
+// 		return err
+// 	}
 
-	// Convert TTL string to time.Duration
-	input.Ttl, err = time.ParseDuration(input.TtlString)
-	if err != nil {
-		l.Error().
-			Err(err).
-			Str("ttlstring", input.TtlString).
-			Msg("Could not convert time string to duration")
-		return err
-	}
+// 	// Convert TTL string to time.Duration
+// 	input.Ttl, err = time.ParseDuration(input.TtlString)
+// 	if err != nil {
+// 		l.Error().
+// 			Err(err).
+// 			Str("ttlstring", input.TtlString).
+// 			Msg("Could not convert time string to duration")
+// 		return err
+// 	}
 
-	l.Trace().Interface("input", input).Msg("Input")
+// 	l.Trace().Interface("input", input).Msg("Input")
 
-	absoluteFilePath := filepath.Join(a.dataFilesPath, input.Filepath)
-	exists, err := pathExists(absoluteFilePath)
-	if err != nil {
-		l.Error().Err(err).Str("FilePath", input.Filepath).Msg("An error occurred determining if filepath exists")
-		return err
-	}
+// 	absoluteFilePath := filepath.Join(a.dataFilesPath, input.Filepath)
+// 	exists, err := pathExists(absoluteFilePath)
+// 	if err != nil {
+// 		l.Error().Err(err).Str("FilePath", input.Filepath).Msg("An error occurred determining if filepath exists")
+// 		return err
+// 	}
 
-	if exists {
-		id, err := GenerateLink()
-		if err != nil {
-			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred generating a random ID")
-			return err
-		}
-		l.Info().Str("id", id).Msg("Generated ID")
+// 	if exists {
+// 		id, err := GenerateLink()
+// 		if err != nil {
+// 			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred generating a random ID")
+// 			return err
+// 		}
+// 		l.Info().Str("id", id).Msg("Generated ID")
 
-		err = a.db.Set([]byte(id), []byte(input.Filepath), input.Ttl)
+// 		err = a.db.Set([]byte(id), []byte(input.Filepath), input.Ttl)
 
-		if err != nil {
-			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred inserting a record")
-			return err
-		}
+// 		if err != nil {
+// 			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred inserting a record")
+// 			return err
+// 		}
 
-	} else {
-		l.Error().Err(err).Str("FilePath", input.Filepath).Str("AbsoluteFilePath", absoluteFilePath).Msg("Filepath does not exist")
-		return fmt.Errorf("file does not exist")
-	}
+// 	} else {
+// 		l.Error().Err(err).Str("FilePath", input.Filepath).Str("AbsoluteFilePath", absoluteFilePath).Msg("Filepath does not exist")
+// 		return fmt.Errorf("file does not exist")
+// 	}
 
-	data, err := a.GetUiData()
-	if err != nil {
-		l.Error().Err(err).Msg("failed to get required ui data")
-		return err
-	}
+// 	data, err := a.GetUiData()
+// 	if err != nil {
+// 		l.Error().Err(err).Msg("failed to get required ui data")
+// 		return err
+// 	}
 
-	return a.Render(c, AdminSharedLinksTable(data.SharedLinks))
+// 	return a.Render(c, AdminSharedLinksTable(data.SharedLinks))
 
-}
+// }
 
 func GenerateLink() (string, error) {
 	data, err := random.String(64)
