@@ -34,6 +34,7 @@ type ISeclinkDb interface {
 	CreateLink(link Link) error
 	CreatePost(post Post) error
 	DeletePost(name string) error
+	GetPost(name string) (Post, error)
 	DeleteLink(id string) error
 	GetLink(id string) (GetLinkRow, error)
 	GetAllPosts() ([]Post, error)
@@ -229,6 +230,20 @@ func (d *SSeclinkDb) GetAllPosts() ([]Post, error) {
 	}
 
 	return allPosts, nil
+
+}
+
+// Get post
+func (d *SSeclinkDb) GetPost(name string) (Post, error) {
+
+	ctx := context.Background()
+
+	post, err := d.queries.GetPost(ctx, name)
+	if err != nil {
+		return Post{}, err
+	}
+
+	return post, nil
 
 }
 

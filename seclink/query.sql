@@ -18,6 +18,9 @@ FROM links
 JOIN posts ON links.post_name = posts.name
 WHERE links.id = ?;
 
+-- name: GetPost :one
+SELECT * FROM posts WHERE name = ?;
+
 -- name: GetAllPosts :many
 SELECT * FROM posts;
 

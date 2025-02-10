@@ -28,7 +28,7 @@ templ AdminLayout() {
 	</html>
 }
 
-templ AdminLinksTable(links []db.Link) {
+templ AdminLinksTable(links []db.GetAllLinksRow) {
 	<h4>Active links</h4>
 	<table class="table">
 	<thead>
@@ -40,31 +40,32 @@ templ AdminLinksTable(links []db.Link) {
 	<tbody>
 	for _, link := range links {
 		<tr>
-		<td>{ link.PostName }</td>
-		<td>{{ strExpires := strconv.FormatInt(link.Expires, 10)}}{ strExpires }</td>
+		<td>{ link.Link.PostName }</td>
+		<td>{{ strExpires := strconv.FormatInt(link.Link.Expires, 10)}}{ strExpires }</td>
 		</tr>
 	}
 	</tbody> 
 	</table>
 }
 
-templ AdminFileTable(files []SFile) {
+templ AdminPostTable(posts []db.Post) {
 	<h4>Files</h4>
 	<table class="table">
 	<thead>
 		<tr>
+		<th>Name</th>
 		<th>Path</th>
-		<th>TTL</th>
 		<th></th>
 		<th></th>
 		<th></th>
 		</tr>
 	</thead>
 	<tbody>
-	for index, file := range files {
+	for index, post := range posts {
 		<tr>
-		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="path" value={ file.Path }/>{ file.Path }</td>
-		<td><input type="text" class={ fmt.Sprintf("row%d-input", index) } name="ttl" value={ file.TtlString }/></td>
+		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="name" value="{ post.Path }"/>{ post.Name }</td>
+		<td>{ post.Path }</td>
+		<td><input type="text" class={ fmt.Sprintf("row%d-input", index) } name="ttl" value="24h"/></td>
 		<td><button hx-post="/api/v1/links/share"  hx-target="#linksTable" hx-include={ fmt.Sprintf(".row%d-input", index) } hx-ext="json-enc">Share</button></td>
 		<td>Delete</td>
 		</tr>
@@ -76,18 +77,19 @@ templ AdminFileTable(files []SFile) {
 templ AdminUploadFileForm() {
 	<h4>Upload</h4>
 	<form id="binaryForm" enctype="multipart/form-data">
+	<input type="text" name="
 	<input type="file" name="binaryFile">
 	<button hx-post="/api/v1/files/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#fileTable">Upload</button>
 	</form>
 }
 
-templ AdminUiPage(links []db.Link, files []SFile) {
+templ AdminUiPage(links []db.GetAllLinksRow, posts []db.Post) {
 	@AdminLayout() {
 		<div id="linksTable">
 		@AdminLinksTable(links)
 		</div>
 		<div id="fileTable">
-		@AdminFileTable(files)
+		@AdminPostTable(posts)
 		</div>
 		@AdminUploadFileForm()
 	}

@@ -26,7 +26,7 @@ import (
 var res embed.FS
 
 type SCreateLink struct {
-	Filepath  string        `json:"path"`
+	PostName  string        `json:"path"`
 	TtlString string        `json:"ttl"`
 	Ttl       time.Duration `json:"-"`
 }
@@ -132,65 +132,79 @@ func (a *SSeclinkApi) Start() error {
 // 	return nil
 // }
 
-// func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
-// 	l := log.Get()
+func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
+	l := log.Get()
 
-// 	var input SCreateLink
-// 	var err error
+	var input SCreateLink
+	var err error
 
-// 	if err := c.BodyParser(&input); err != nil {
-// 		l.Error().Err(err).Msg("Invalid input")
-// 		return err
-// 	}
+	if err := c.BodyParser(&input); err != nil {
+		l.Error().Err(err).Msg("Invalid input")
+		return err
+	}
 
-// 	// Convert TTL string to time.Duration
-// 	input.Ttl, err = time.ParseDuration(input.TtlString)
-// 	if err != nil {
-// 		l.Error().
-// 			Err(err).
-// 			Str("ttlstring", input.TtlString).
-// 			Msg("Could not convert time string to duration")
-// 		return err
-// 	}
+	// Convert TTL string to time.Duration
+	input.Ttl, err = time.ParseDuration(input.TtlString)
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("ttlstring", input.TtlString).
+			Msg("Could not convert time string to duration")
+		return err
+	}
 
-// 	l.Trace().Interface("input", input).Msg("Input")
+	l.Trace().Interface("input", input).Msg("Input")
 
-// 	absoluteFilePath := filepath.Join(a.dataFilesPath, input.Filepath)
-// 	exists, err := pathExists(absoluteFilePath)
-// 	if err != nil {
-// 		l.Error().Err(err).Str("FilePath", input.Filepath).Msg("An error occurred determining if filepath exists")
-// 		return err
-// 	}
+	post, err := a.db.GetPost(input.PostName)
+	if err != nil {
+		l.Error().Err(err).Str("PostName", input.PostName).Msg("Post does not exist in DB or error finding record")
+		return err
+	} else {
+		l.Info().Str("PostName", post.Name).Msg("Found Post in DB")
+	}
 
-// 	if exists {
-// 		id, err := GenerateLink()
-// 		if err != nil {
-// 			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred generating a random ID")
-// 			return err
-// 		}
-// 		l.Info().Str("id", id).Msg("Generated ID")
+	absoluteFilePath := filepath.Join(a.dataFilesPath, post.Path)
+	exists, err := pathExists(absoluteFilePath)
+	if err != nil {
+		l.Error().Err(err).Str("FilePath", absoluteFilePath).Msg("Post file path does not exist")
+		return err
+	}
 
-// 		err = a.db.Set([]byte(id), []byte(input.Filepath), input.Ttl)
+	if exists {
+		id, err := GenerateLink()
+		if err != nil {
+			l.Error().Err(err).Str("PostName", post.Name).Str("id", id).Msg("An error occurred generating a random ID")
+			return err
+		}
+		l.Info().Str("id", id).Msg("Generated ID")
 
-// 		if err != nil {
-// 			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred inserting a record")
-// 			return err
-// 		}
+		// Formulate the expires time
+		expiresAt := time.Now().Local().Add(input.Ttl)
+		expiresAtUnixEpoch := expiresAt.Unix()
 
-// 	} else {
-// 		l.Error().Err(err).Str("FilePath", input.Filepath).Str("AbsoluteFilePath", absoluteFilePath).Msg("Filepath does not exist")
-// 		return fmt.Errorf("file does not exist")
-// 	}
+		link := db.Link{ID: id, Expires: expiresAtUnixEpoch, PostName: post.Name}
 
-// 	data, err := a.GetUiData()
-// 	if err != nil {
-// 		l.Error().Err(err).Msg("failed to get required ui data")
-// 		return err
-// 	}
+		err = a.db.CreateLink(link)
 
-// 	return a.Render(c, AdminSharedLinksTable(data.SharedLinks))
+		if err != nil {
+			l.Error().Err(err).Interface("link", link).Msg("An error occurred creating the link record in the database")
+			return err
+		}
 
-// }
+	} else {
+		l.Error().Err(err).Str("PostName", post.Name).Str("AbsoluteFilePath", absoluteFilePath).Msg("Path for post does not exist")
+		return fmt.Errorf("post path does not exist")
+	}
+
+	data, err := a.GetUiData()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get required ui data")
+		return err
+	}
+
+	return a.Render(c, AdminLinksTable(data.Links))
+
+}
 
 func GenerateLink() (string, error) {
 	data, err := random.String(64)
@@ -213,16 +227,6 @@ func (a *SSeclinkApi) GetFileList() ([]SFile, error) {
 	return files, err
 }
 
-// Get active links list
-func (a *SSeclinkApi) GetLinks() ([]db.GetAllLinksRow, error) {
-	ctx := context.Background()
-	results, err := a.db.Queries().GetAllLinks(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
 // If link exists and has not expired then return downloaded file
 func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 	l := log.Get()
@@ -236,7 +240,7 @@ func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 		return err
 	}
 
-	return a.Render(c, AdminUiPage(data.SharedLinks, data.Files))
+	return a.Render(c, AdminUiPage(data.Links, data.Posts))
 }
 
 func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
@@ -282,7 +286,7 @@ func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
 		return err
 	}
 
-	return a.Render(c, AdminFileTable(data.Files))
+	return a.Render(c, AdminPostTable(data.Posts))
 }
 
 // Get all current data on the app, used for rendering UI pages
@@ -290,24 +294,28 @@ func (a *SSeclinkApi) GetUiData() (SUiData, error) {
 
 	l := log.Get()
 
-	sharedLinks, err := a.GetLinks()
+	ctx := context.Background()
+
+	links, err := a.db.Queries().GetAllLinks(ctx)
 	if err != nil {
 		l.Error().Err(err).Msg("failed to get links from db")
 		return SUiData{}, err
 	}
 
-	files, err := a.GetFileList()
+	posts, err := a.db.Queries().GetAllPosts(ctx)
 	if err != nil {
-		l.Error().
-			Err(err).
-			Str("datapath", a.dataFilesPath).
-			Msg("Could not list files in data path")
+		l.Error().Err(err).Msg("failed to get links from db")
+		return SUiData{}, err
+	}
+
+	if err != nil {
+
 		return SUiData{}, err
 	}
 
 	return SUiData{
-		SharedLinks: sharedLinks,
-		Files:       files,
+		Links: links,
+		Posts: posts,
 	}, nil
 
 }

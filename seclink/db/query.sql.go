@@ -149,3 +149,14 @@ func (q *Queries) GetLink(ctx context.Context, id string) (GetLinkRow, error) {
 	)
 	return i, err
 }
+
+const getPost = `-- name: GetPost :one
+SELECT name, path FROM posts WHERE name = ?
+`
+
+func (q *Queries) GetPost(ctx context.Context, name string) (Post, error) {
+	row := q.db.QueryRowContext(ctx, getPost, name)
+	var i Post
+	err := row.Scan(&i.Name, &i.Path)
+	return i, err
+}
