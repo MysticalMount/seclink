@@ -214,7 +214,7 @@ func (a *SSeclinkApi) GetFileList() ([]SFile, error) {
 }
 
 // Get active links list
-func (a *SSeclinkApi) GetLinks() ([]db.Link, error) {
+func (a *SSeclinkApi) GetLinks() ([]db.GetAllLinksRow, error) {
 	ctx := context.Background()
 	results, err := a.db.Queries().GetAllLinks(ctx)
 	if err != nil {

@@ -22,17 +22,29 @@ const databaseFilename = "sqlitedb"
 var migrations embed.FS
 
 type ISeclinkDb interface {
+
+	// Control functions
 	Start() error
 	Migrate() error
-	// GetAllLinks() ([]SSharedLink, error)
 	Close() error
 	Queries() *Queries
+
+	// Repository functions
+	GetAllLinks() ([]GetAllLinksRow, error)
+	CreateLink(link Link) error
+	CreatePost(post Post) error
+	DeletePost(name string) error
+	DeleteLink(id string) error
+	GetLink(id string) (GetLinkRow, error)
+	GetAllPosts() ([]Post, error)
 }
 
 type SSeclinkDb struct {
 	db      *sql.DB
 	queries *Queries
 }
+
+// Control functions
 
 func (d *SSeclinkDb) Start() error {
 
@@ -45,7 +57,8 @@ func (d *SSeclinkDb) Start() error {
 
 	// connect
 	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
+	if err != nil { // list all authors
+
 		l.Error().
 			Err(err).
 			Msg("An error was encountered opening the Sqlite database")
@@ -110,21 +123,22 @@ func (d *SSeclinkDb) Migrate() error {
 	return err
 }
 
-func (d *SSeclinkDb) Queries() *Queries {
-	return d.queries
-}
-
 // Closes the DB
 func (d *SSeclinkDb) Close() error {
 	return d.db.Close()
 }
 
+func (d *SSeclinkDb) Queries() *Queries {
+	return d.queries
+}
+
+// Repository functions
+
 // Gets all links in the db
-func (d *SSeclinkDb) GetAllLinks() ([]Link, error) {
+func (d *SSeclinkDb) GetAllLinks() ([]GetAllLinksRow, error) {
 
 	ctx := context.Background()
 
-	// list all authors
 	links, err := d.queries.GetAllLinks(ctx)
 	if err != nil {
 		return nil, err
@@ -139,7 +153,6 @@ func (d *SSeclinkDb) CreateLink(link Link) error {
 
 	ctx := context.Background()
 
-	// list all authors
 	err := d.queries.CreateLink(ctx, CreateLinkParams(link))
 	if err != nil {
 		return err
@@ -154,13 +167,68 @@ func (d *SSeclinkDb) CreatePost(post Post) error {
 
 	ctx := context.Background()
 
-	// list all authors
 	err := d.queries.CreatePost(ctx, CreatePostParams(post))
 	if err != nil {
 		return err
 	}
 
 	return nil
+
+}
+
+// Delete post
+func (d *SSeclinkDb) DeletePost(name string) error {
+
+	ctx := context.Background()
+
+	err := d.queries.DeletePost(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+// Delete link
+func (d *SSeclinkDb) DeleteLink(id string) error {
+
+	ctx := context.Background()
+
+	err := d.queries.DeleteLink(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+// Get link
+func (d *SSeclinkDb) GetLink(id string) (GetLinkRow, error) {
+
+	ctx := context.Background()
+
+	getLinkRow, err := d.queries.GetLink(ctx, id)
+	if err != nil {
+		return GetLinkRow{}, err
+	}
+
+	return getLinkRow, nil
+
+}
+
+// Get all posts
+func (d *SSeclinkDb) GetAllPosts() ([]Post, error) {
+
+	ctx := context.Background()
+
+	allPosts, err := d.queries.GetAllPosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return allPosts, nil
 
 }
 

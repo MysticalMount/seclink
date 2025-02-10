@@ -1,7 +1,3 @@
--- name: GetAllLinks :many
-SELECT * FROM links
-ORDER BY id;
-
 -- name: CreateLink :exec
 INSERT INTO links (id, expires, post_name)
 VALUES (?, ?, ?);
@@ -16,24 +12,16 @@ VALUES (?, ?);
 -- name: DeletePost :exec
 DELETE FROM posts WHERE name = ?;
 
--- -- name: ListAuthors :many
--- SELECT * FROM authors
--- ORDER BY name;
+-- name: GetLink :one
+SELECT sqlc.embed(links), sqlc.embed(posts)
+FROM links
+JOIN posts ON links.post_name = posts.name
+WHERE links.id = ?;
 
--- -- name: CreateAuthor :one
--- INSERT INTO authors (
---   name, bio
--- ) VALUES (
---   ?, ?
--- )
--- RETURNING *;
+-- name: GetAllPosts :many
+SELECT * FROM posts;
 
--- -- name: UpdateAuthor :exec
--- UPDATE authors
--- set name = ?,
--- bio = ?
--- WHERE id = ?;
-
--- -- name: DeleteAuthor :exec
--- DELETE FROM authors
--- WHERE id = ?;
+-- name: GetAllLinks :many
+SELECT sqlc.embed(posts), sqlc.embed(links)
+FROM links
+JOIN posts ON links.post_name = posts.name;

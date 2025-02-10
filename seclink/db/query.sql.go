@@ -59,20 +59,32 @@ func (q *Queries) DeletePost(ctx context.Context, name string) error {
 }
 
 const getAllLinks = `-- name: GetAllLinks :many
-SELECT id, expires, post_name FROM links
-ORDER BY id
+SELECT posts.name, posts.path, links.id, links.expires, links.post_name
+FROM links
+JOIN posts ON links.post_name = posts.name
 `
 
-func (q *Queries) GetAllLinks(ctx context.Context) ([]Link, error) {
+type GetAllLinksRow struct {
+	Post Post
+	Link Link
+}
+
+func (q *Queries) GetAllLinks(ctx context.Context) ([]GetAllLinksRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAllLinks)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Link
+	var items []GetAllLinksRow
 	for rows.Next() {
-		var i Link
-		if err := rows.Scan(&i.ID, &i.Expires, &i.PostName); err != nil {
+		var i GetAllLinksRow
+		if err := rows.Scan(
+			&i.Post.Name,
+			&i.Post.Path,
+			&i.Link.ID,
+			&i.Link.Expires,
+			&i.Link.PostName,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -84,4 +96,56 @@ func (q *Queries) GetAllLinks(ctx context.Context) ([]Link, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const getAllPosts = `-- name: GetAllPosts :many
+SELECT name, path FROM posts
+`
+
+func (q *Queries) GetAllPosts(ctx context.Context) ([]Post, error) {
+	rows, err := q.db.QueryContext(ctx, getAllPosts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Post
+	for rows.Next() {
+		var i Post
+		if err := rows.Scan(&i.Name, &i.Path); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLink = `-- name: GetLink :one
+SELECT links.id, links.expires, links.post_name, posts.name, posts.path
+FROM links
+JOIN posts ON links.post_name = posts.name
+WHERE links.id = ?
+`
+
+type GetLinkRow struct {
+	Link Link
+	Post Post
+}
+
+func (q *Queries) GetLink(ctx context.Context, id string) (GetLinkRow, error) {
+	row := q.db.QueryRowContext(ctx, getLink, id)
+	var i GetLinkRow
+	err := row.Scan(
+		&i.Link.ID,
+		&i.Link.Expires,
+		&i.Link.PostName,
+		&i.Post.Name,
+		&i.Post.Path,
+	)
+	return i, err
 }
