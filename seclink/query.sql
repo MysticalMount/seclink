@@ -2,6 +2,20 @@
 SELECT * FROM links
 ORDER BY id;
 
+-- name: CreateLink :exec
+INSERT INTO links (id, expires, post_name)
+VALUES (?, ?, ?);
+
+-- name: DeleteLink :exec
+DELETE FROM links WHERE id = ?;
+
+-- name: CreatePost :exec
+INSERT INTO posts (name, path)
+VALUES (?, ?);
+
+-- name: DeletePost :exec
+DELETE FROM posts WHERE name = ?;
+
 -- -- name: ListAuthors :many
 -- SELECT * FROM authors
 -- ORDER BY name;

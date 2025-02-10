@@ -1,12 +1,14 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"path/filepath"
 	"seclink/log"
 
-	_ "github.com/glebarez/go-sqlite"
+	// _ "github.com/glebarez/go-sqlite"
+
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -90,9 +92,20 @@ func (d *SSeclinkDb) Migrate() error {
 
 	// Create new golang-migrate instance
 	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	if err != nil {
+		l.Error().
+			Err(err).
+			Msg("An error was encountered during database migration")
+		return err
+	}
 
 	// Migrate all
 	m.Up()
+
+	// Indicate successful migration
+	l.Info().
+		Err(err).
+		Msg("Successful database migrations")
 
 	return err
 }
@@ -106,48 +119,50 @@ func (d *SSeclinkDb) Close() error {
 	return d.db.Close()
 }
 
-// Gets all keys in the db
-// func (d *SSeclinkDb) GetAllLinks() ([]SSharedLink, error) {
-// 	//l := log.Get()
+// Gets all links in the db
+func (d *SSeclinkDb) GetAllLinks() ([]Link, error) {
 
-// 	results := make([]SSharedLink, 0)
+	ctx := context.Background()
 
-// 	err := d.db.View(func(txn *badger.Txn) error {
-// 		opts := badger.DefaultIteratorOptions
-// 		opts.PrefetchSize = 10
-// 		it := txn.NewIterator(opts)
-// 		defer it.Close()
-// 		for it.Rewind(); it.Valid(); it.Next() {
-// 			newResult := SSharedLink{}
-// 			item := it.Item()
-// 			k := item.Key()
+	// list all authors
+	links, err := d.queries.GetAllLinks(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-// 			// Get timestamp
-// 			expiresAt := time.Unix(int64(item.ExpiresAt()), 0)
-// 			newResult.ExpiresAt = expiresAt
-// 			newResult.Ttl = time.Duration(time.Since(expiresAt))
-// 			newResult.TtlString = newResult.Ttl.String()
+	return links, err
 
-// 			// l.Trace().Time("expiresAt", expiresAt).Msg("trace log for record expiration")
+}
 
-// 			err := item.Value(func(v []byte) error {
-// 				newResult.Id = string(k)
-// 				newResult.Path = string(v)
-// 				return nil
-// 			})
-// 			if err != nil {
-// 				return err
-// 			}
+// Add a link
+func (d *SSeclinkDb) CreateLink(link Link) error {
 
-// 			// Formulate external URL
-// 			newResult.Url = fmt.Sprintf("%s/links/%s", viper.GetString("server.externalurl"), newResult.Id)
+	ctx := context.Background()
 
-// 			results = append(results, newResult)
-// 		}
-// 		return nil
-// 	})
-// 	return results, err
-// }
+	// list all authors
+	err := d.queries.CreateLink(ctx, CreateLinkParams(link))
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+// Create post
+func (d *SSeclinkDb) CreatePost(post Post) error {
+
+	ctx := context.Background()
+
+	// list all authors
+	err := d.queries.CreatePost(ctx, CreatePostParams(post))
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
 
 // New Seclink DB
 func NewSeclinkDb() ISeclinkDb {

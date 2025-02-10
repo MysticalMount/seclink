@@ -9,6 +9,55 @@ import (
 	"context"
 )
 
+const createLink = `-- name: CreateLink :exec
+INSERT INTO links (id, expires, post_name)
+VALUES (?, ?, ?)
+`
+
+type CreateLinkParams struct {
+	ID       string
+	Expires  int64
+	PostName string
+}
+
+func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) error {
+	_, err := q.db.ExecContext(ctx, createLink, arg.ID, arg.Expires, arg.PostName)
+	return err
+}
+
+const createPost = `-- name: CreatePost :exec
+INSERT INTO posts (name, path)
+VALUES (?, ?)
+`
+
+type CreatePostParams struct {
+	Name string
+	Path string
+}
+
+func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) error {
+	_, err := q.db.ExecContext(ctx, createPost, arg.Name, arg.Path)
+	return err
+}
+
+const deleteLink = `-- name: DeleteLink :exec
+DELETE FROM links WHERE id = ?
+`
+
+func (q *Queries) DeleteLink(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteLink, id)
+	return err
+}
+
+const deletePost = `-- name: DeletePost :exec
+DELETE FROM posts WHERE name = ?
+`
+
+func (q *Queries) DeletePost(ctx context.Context, name string) error {
+	_, err := q.db.ExecContext(ctx, deletePost, name)
+	return err
+}
+
 const getAllLinks = `-- name: GetAllLinks :many
 SELECT id, expires, post_name FROM links
 ORDER BY id
