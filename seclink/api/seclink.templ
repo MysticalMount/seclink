@@ -75,22 +75,30 @@ templ AdminPostTable(posts []db.Post) {
 }
 
 templ AdminUploadFileForm() {
-	<h4>Upload</h4>
+	<h4>Upload file</h4>
 	<form id="binaryForm" enctype="multipart/form-data">
-	<input type="text" name="
 	<input type="file" name="binaryFile">
 	<button hx-post="/api/v1/files/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#fileTable">Upload</button>
 	</form>
 }
+
+templ AdminUploadPageForm() {
+	<h4>Upload page</h4>
+	<form id="binaryForm" enctype="multipart/form-data">
+	<input type="file" name="binaryFile">
+	<button hx-post="/api/v1/pages/upload" hx-include="[name='binaryFile']" hx-encoding="multipart/form-data" hx-target="#pageTable">Upload</button>
+	</form>
+}
+
 
 templ AdminUiPage(links []db.GetAllLinksRow, posts []db.Post) {
 	@AdminLayout() {
 		<div id="linksTable">
 		@AdminLinksTable(links)
 		</div>
-		<div id="fileTable">
+		<div id="pageTable">
 		@AdminPostTable(posts)
 		</div>
-		@AdminUploadFileForm()
+		@AdminUploadPageForm()
 	}
 }

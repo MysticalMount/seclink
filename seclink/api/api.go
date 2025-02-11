@@ -1,15 +1,18 @@
 package api
 
 import (
+	"archive/zip"
 	"context"
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"seclink/db"
 	"seclink/log"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -21,6 +24,8 @@ import (
 	"github.com/mazen160/go-random"
 	"github.com/spf13/viper"
 )
+
+const mdName = "page.md"
 
 //go:embed resources/*
 var res embed.FS
@@ -70,7 +75,8 @@ func (a *SSeclinkApi) Start() error {
 	app.Use(recover.New())
 	admin.Get("/admin", a.AdminUI)
 	// admin.Post("/api/v1/links/share", a.CreateLink)
-	admin.Post("/api/v1/files/upload", a.UploadFile)
+	// admin.Post("/api/v1/files/upload", a.UploadFile)
+	admin.Post("/api/v1/pages/upload", a.UploadPage)
 
 	// Start admin port listening, as a goroutine
 	go admin.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.adminport")))
@@ -289,8 +295,137 @@ func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
 	return a.Render(c, AdminPostTable(data.Posts))
 }
 
+func (a *SSeclinkApi) UploadPage(c *fiber.Ctx) error {
+	l := log.Get()
+
+	l.Trace().Msg("UploadFile called")
+
+	file, err := c.FormFile("binaryFile")
+	if err != nil {
+		l.Error().Err(err).Msg("Unable to load form data")
+		return err
+	}
+
+	// Check is a zip file, required for page upload
+	if filepath.Ext(file.Filename) == ".zip" {
+		l.Info().Str("Filename", file.Filename).Msg("File extension zip is valid")
+	} else {
+		err := fmt.Errorf("must provide a zip file")
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("File extension zip is not valid")
+		return err
+	}
+
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "page-upload")
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("Error creating temporary directory")
+	} else {
+		l.Info().Err(err).Str("Filename", file.Filename).Str("tempDir", tempDir).Msg("Successfully created temporary directory")
+	}
+	defer os.RemoveAll(tempDir)
+
+	savePath := filepath.Join(tempDir, file.Filename)
+
+	// Check for errors:
+	if err == nil {
+		l.Info().
+			Str("savePath", savePath).
+			Str("Filename", file.Filename).
+			Msg("file upload successful, saving file")
+		// 👷 Save file to root directory:
+		err = c.SaveFile(file, savePath)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("savePath", savePath).
+				Str("Filename", file.Filename).
+				Msg("failed to save file to the save path")
+			return err
+		}
+	} else {
+		l.Error().
+			Err(err).
+			Str("Filename", file.Filename).
+			Msg("failed to upload file")
+		return err
+	}
+
+	// Extract the ZIP file, read markdown metadata
+	extractPath := filepath.Join(tempDir, "extract")
+	err = Unzip(savePath, extractPath)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("extractPath", extractPath).Str("zipFile", savePath).Msg("Error unzipping file")
+		return err
+	}
+
+	l.Info().Str("Filename", file.Filename).Str("extractPath", extractPath).Str("zipFile", savePath).Msg("Successfull unzip")
+
+	// Check the page.md file exists at a minimum this must exist
+	mdPath := filepath.Join(extractPath, mdName)
+	if exists, err := pathExists(mdPath); err != nil || !exists {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("No %s file was found within zip", mdName)
+	}
+
+	l.Info().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file was found, proceeding to process metadata", mdName)
+
+	// Process metadata
+
+	// Read in md file
+	mdData, err := os.ReadFile(mdPath)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file could not be read", mdName)
+	}
+
+	// Parse the file
+	Page, err := parseMarkdownFile(mdData)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file could not be parsed successfully, check format", mdName)
+	}
+
+	// Check that we have a slug name in the metadata, this will be the page name reference, folder name, and unique ID in the database
+	if Page.Slug != "" {
+
+		// Determine data path for page
+		pagePath := filepath.Join(viper.GetString("server.datapath"), Page.Slug)
+
+		// Re-unzip the page data in the page folder
+		err := Unzip(savePath, pagePath)
+		if err != nil {
+			l.Error().Err(err).Str("Filename", file.Filename).Str("pagePath", pagePath).Msg("Failed to unzip to page data directory")
+			return err
+		}
+
+		// Create an entry in the database for the page
+		// TODO: Check there isnt an existing record and dont do anything if there already is/update path
+		err = a.db.CreatePost(db.Post{Name: Page.Slug, Path: Page.Slug})
+		if err != nil {
+			l.Error().Err(err).Str("Filename", file.Filename).Str("pagePath", pagePath).Msg("Failed to create database record for page")
+			return err
+		}
+	} else {
+		err = fmt.Errorf("slug metadata must be provided and not blank")
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("Missing slug metadata")
+		return err
+	}
+
+	// Return success
+	err = c.SendString("Page upload successful!")
+	if err != nil {
+		return err
+	}
+
+	// Update post table
+	data, err := a.GetUiData()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get required ui data")
+		return err
+	}
+
+	return a.Render(c, AdminPostTable(data.Posts))
+}
+
 // Get all current data on the app, used for rendering UI pages
-func (a *SSeclinkApi) GetUiData() (SUiData, error) {
+func (a *SSeclinkApi) GetUiData() (UiData, error) {
 
 	l := log.Get()
 
@@ -299,21 +434,16 @@ func (a *SSeclinkApi) GetUiData() (SUiData, error) {
 	links, err := a.db.Queries().GetAllLinks(ctx)
 	if err != nil {
 		l.Error().Err(err).Msg("failed to get links from db")
-		return SUiData{}, err
+		return UiData{}, err
 	}
 
 	posts, err := a.db.Queries().GetAllPosts(ctx)
 	if err != nil {
-		l.Error().Err(err).Msg("failed to get links from db")
-		return SUiData{}, err
+		l.Error().Err(err).Msg("failed to get posts from db")
+		return UiData{}, err
 	}
 
-	if err != nil {
-
-		return SUiData{}, err
-	}
-
-	return SUiData{
+	return UiData{
 		Links: links,
 		Posts: posts,
 	}, nil
@@ -336,6 +466,8 @@ func NewSeclinkApi(db db.ISeclinkDb) ISeclinkApi {
 	}
 }
 
+// Helper functions
+
 // Path exists
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
@@ -346,4 +478,72 @@ func pathExists(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// Extract zip
+func Unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			panic(err)
+		}
+	}()
+
+	err = os.MkdirAll(dest, 0700)
+	if err != nil {
+		return err
+	}
+
+	// Closure to address file descriptors issue with all the deferred .Close() methods
+	extractAndWriteFile := func(f *zip.File) error {
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := rc.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		path := filepath.Join(dest, f.Name)
+
+		// Check for ZipSlip (Directory traversal)
+		if !strings.HasPrefix(path, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", path)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(path, f.Mode())
+		} else {
+			os.MkdirAll(filepath.Dir(path), f.Mode())
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if err := f.Close(); err != nil {
+					panic(err)
+				}
+			}()
+
+			_, err = io.Copy(f, rc)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, f := range r.File {
+		err := extractAndWriteFile(f)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
