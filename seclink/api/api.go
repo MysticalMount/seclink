@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"seclink/db"
 	"seclink/log"
 	"strings"
@@ -30,8 +31,8 @@ const mdName = "page.md"
 //go:embed resources/*
 var res embed.FS
 
-type SCreateLink struct {
-	PostName  string        `json:"path"`
+type CreateLinkParams struct {
+	PostName  string        `json:"post_name"`
 	TtlString string        `json:"ttl"`
 	Ttl       time.Duration `json:"-"`
 }
@@ -59,9 +60,10 @@ func (a *SSeclinkApi) Start() error {
 		Logger: &l,
 	}))
 	app.Use(recover.New())
-	// app.Get("/links/:id", a.GetLink)
+	app.Use("/links", a.GetLink)
 
 	// Private admin API and port
+
 	// TODO: Make the BodyLimit in MB a configurable option
 	admin := fiber.New(fiber.Config{BodyLimit: 2000 * 1024 * 1024}) // Ensure we load the HTML template rendering engine
 	admin.Use("/static", filesystem.New(filesystem.Config{
@@ -74,7 +76,7 @@ func (a *SSeclinkApi) Start() error {
 	}))
 	app.Use(recover.New())
 	admin.Get("/admin", a.AdminUI)
-	// admin.Post("/api/v1/links/share", a.CreateLink)
+	admin.Post("/api/v1/links/share", a.CreateLink)
 	// admin.Post("/api/v1/files/upload", a.UploadFile)
 	admin.Post("/api/v1/pages/upload", a.UploadPage)
 
@@ -91,57 +93,115 @@ func (a *SSeclinkApi) Start() error {
 
 }
 
-// // If link exists and has not expired then return downloaded file
-// func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
-// 	l := log.Get()
+// If link exists and has not expired then return downloaded file
+func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
+	l := log.Get()
 
-// 	if id := c.Params("id"); id != "" {
+	// We need to parse the incoming route
+	// and then use that as the ID for the link in the database
 
-// 		// See if the ID exists in the database
-// 		filePath, err := a.db.Get([]byte(id))
-// 		if err != nil {
-// 			l.Error().
-// 				Err(err).
-// 				Str("ID", id).
-// 				Msg("Could not find id in database")
-// 			return err
-// 		}
+	splitPath := strings.Split(c.Path(), "/")
+	if len(splitPath) < 3 {
+		err := fmt.Errorf("missing ID")
+		l.Error().
+			Err(err).
+			Msg("Missing ID field")
+		return err
+	}
+	id := splitPath[2]
 
-// 		// Check the file exists
-// 		absoluteFilePath := filepath.Join(a.dataFilesPath, string(filePath))
-// 		exists, err := pathExists(absoluteFilePath)
-// 		if err != nil {
-// 			l.Error().
-// 				Err(err).
-// 				Str("ID", id).
-// 				Str("AbsoluteFilePath", absoluteFilePath).
-// 				Msg("Error occurred checking if file exists")
-// 			return err
-// 		}
-// 		if !exists {
-// 			l.Error().
-// 				Str("ID", id).
-// 				Str("AbsoluteFilePath", absoluteFilePath).
-// 				Msg("File does not exist")
-// 			return err
-// 		}
+	// Validate that id exists in the path and is valid
+	if len(id) != 64 || !regexp.MustCompile(`^([A-Za-z0-9]{64})$`).MatchString(id) {
+		err := fmt.Errorf("ID %s is not a valid ID", id)
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Not a valid ID")
+		return err
+	}
 
-// 		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Downloading file")
-// 		c.Download(absoluteFilePath, string(filePath))
+	// See if the ID exists in the database
+	getLinkRow, err := a.db.GetLink(id)
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Could not find id in database")
+		return err
+	}
 
-// 	} else {
-// 		l.Error().
-// 			Msg("An empty id was provided on the route")
-// 		return fmt.Errorf("an empty id was provided on the route")
-// 	}
+	// Based on the Link.Expires unix epoch, determine if the link has expired or not
+	if time.Now().Unix() > getLinkRow.Link.Expires {
+		err = fmt.Errorf("%s has expired at %d", id, getLinkRow.Link.Expires)
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Link has expired")
 
-// 	return nil
-// }
+		// As the link has expired, we want to use a.db.DeleteLink to remove the link
+		err = a.db.DeleteLink(id)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Msg("Could not be deleted from database")
+			return err
+		}
+
+		return err
+	}
+
+	// Determine paths
+	postPath := filepath.Join(viper.GetString("server.datapath"), getLinkRow.Post.Path)
+	mdPath := filepath.Join(postPath, mdName)
+
+	// If length of path segments is only links and the id, and nothing else has been specified then we only want to render the page.md
+	// and serve the html for this file
+	if len(splitPath) == 3 {
+		// Check for page.md file
+		exists, err := pathExists(mdPath)
+		if err != nil || !exists {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Msgf("Could not find %s in %s", mdName, postPath)
+			return err
+		}
+
+		// Read in the markdown file
+		md, err := os.ReadFile(mdPath)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Str("mdPath", mdPath).
+				Msg("Could not read in page")
+			return err
+		}
+
+		// Parse the markdown file
+		page, err := parseMarkdownFile(md)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("mdPath", mdPath).
+				Msg("Failed to parse markdown")
+		}
+
+		// Serve the HTML
+		c.Set(fiber.HeaderContentType, fiber.MIMETextHTML)
+		return c.Send([]byte(page.Content))
+	}
+
+	// TODO: Serve content if not root requested
+
+	return nil
+}
 
 func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 	l := log.Get()
 
-	var input SCreateLink
+	var input CreateLinkParams
 	var err error
 
 	if err := c.BodyParser(&input); err != nil {
@@ -169,7 +229,7 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 		l.Info().Str("PostName", post.Name).Msg("Found Post in DB")
 	}
 
-	absoluteFilePath := filepath.Join(a.dataFilesPath, post.Path)
+	absoluteFilePath := filepath.Join(viper.GetString("server.datapath"), input.PostName)
 	exists, err := pathExists(absoluteFilePath)
 	if err != nil {
 		l.Error().Err(err).Str("FilePath", absoluteFilePath).Msg("Post file path does not exist")

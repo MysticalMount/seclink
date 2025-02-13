@@ -63,7 +63,7 @@ templ AdminPostTable(posts []db.Post) {
 	<tbody>
 	for index, post := range posts {
 		<tr>
-		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="name" value="{ post.Path }"/>{ post.Name }</td>
+		<td><input type="hidden" class={ fmt.Sprintf("row%d-input", index) } name="post_name" value={ post.Name }/>{ post.Name }</td>
 		<td>{ post.Path }</td>
 		<td><input type="text" class={ fmt.Sprintf("row%d-input", index) } name="ttl" value="24h"/></td>
 		<td><button hx-post="/api/v1/links/share"  hx-target="#linksTable" hx-include={ fmt.Sprintf(".row%d-input", index) } hx-ext="json-enc">Share</button></td>
