@@ -1,7 +1,6 @@
 package api
 
 import (
-	"html/template"
 	"seclink/db"
 )
 
@@ -19,7 +18,7 @@ type Page struct {
 	Title                   string
 	Slug                    string
 	Parent                  string
-	Content                 template.HTML
+	Content                 string
 	Description             string
 	Order                   int
 	Headers                 []string // these are the in page h2 tags

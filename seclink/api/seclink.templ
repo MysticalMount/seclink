@@ -4,6 +4,7 @@ import (
 	"seclink/db"
 	"fmt"
 	"strconv"
+	"github.com/spf13/viper"
 )
 
 templ AdminLayout() {
@@ -35,13 +36,16 @@ templ AdminLinksTable(links []db.GetAllLinksRow) {
 		<tr>
 		<th>Page</th>
 		<th>Expires</th>
+		<th>Link</th>
 		</tr>
 	</thead>
 	<tbody>
 	for _, link := range links {
+		{{ linkUrl := fmt.Sprintf("%s/links/%s", viper.GetString("server.externalurl"), link.Link.ID) }}
 		<tr>
 		<td>{ link.Link.PostName }</td>
 		<td>{{ strExpires := strconv.FormatInt(link.Link.Expires, 10)}}{ strExpires }</td>
+		<td><a href={ templ.URL(linkUrl) }>{ linkUrl }</a></td>
 		</tr>
 	}
 	</tbody> 
@@ -100,5 +104,50 @@ templ AdminUiPage(links []db.GetAllLinksRow, posts []db.Post) {
 		@AdminPostTable(posts)
 		</div>
 		@AdminUploadPageForm()
+	}
+}
+
+templ PageLayout(page Page, glr db.GetLinkRow) {
+	<!DOCTYPE html>
+	<html lang="en">
+	{{ base := fmt.Sprintf("/links/%s/", glr.Link.ID) }}
+	<base href={ base }>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name="description" content={ page.MetaDescription }>
+		<meta property="og:title" content={ page.MetaPropertyTitle }>
+		<meta property="og:description" content={ page.MetaPropertyDescription }>
+		<title>{ page.Title }</title>
+		<link rel="stylesheet" href="/static/css/style.css">
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+		<script defer src="/static/fontawesome-free-6.4.2-web/js/solid.js"></script>
+		<script defer src="/static/fontawesome-free-6.4.2-web/js/fontawesome.js"></script>
+	</head>
+	<body>
+		{ children... }
+	</body>
+	<footer>
+		<div id="footer">
+			<br />
+			<br />
+			<hr />
+			<p>Seclink is a project by MysticalMount</p>
+		</div>
+	</footer>
+	</html>
+}
+
+
+templ RenderPage(page Page, glr db.GetLinkRow) {
+	@PageLayout(page, glr) {
+		<div class="container">
+			<main class="main-content">
+				<h1>{ page.Title }</h1>
+				<p class="description">{ page.Description }</p>
+				<hr />
+				@templ.Raw(page.Content)
+			</main>
+		</div>
 	}
 }

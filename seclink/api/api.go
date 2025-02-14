@@ -59,6 +59,11 @@ func (a *SSeclinkApi) Start() error {
 	app.Use(fiberzerolog.New(fiberzerolog.Config{
 		Logger: &l,
 	}))
+	app.Use("/static", filesystem.New(filesystem.Config{
+		Root:       httpFS,
+		PathPrefix: "resources/static",
+		Browse:     true,
+	}))
 	app.Use(recover.New())
 	app.Use("/links", a.GetLink)
 
@@ -189,13 +194,28 @@ func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
 		}
 
 		// Serve the HTML
-		c.Set(fiber.HeaderContentType, fiber.MIMETextHTML)
-		return c.Send([]byte(page.Content))
+
+		return a.Render(c, RenderPage(page, getLinkRow))
+	} else {
+		// We have an additional path specified, translate this to the file path, if it exists, serve the file
+		strings.Join(splitPath[3:], "/")
+		filePath := filepath.Join(viper.GetString("server.datapath"), getLinkRow.Post.Path, strings.Join(splitPath[3:], "/"))
+		l.Info().
+			Str("filePath", filePath).
+			Msg("Attempting to serve file")
+		exists, err := pathExists(filePath)
+		if err != nil || !exists {
+			l.Error().
+				Err(err).
+				Str("filePath", filePath).
+				Msg("Could not find file")
+			return err
+		}
+
+		// Serve the file
+		return c.SendFile(filePath)
 	}
 
-	// TODO: Serve content if not root requested
-
-	return nil
 }
 
 func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {

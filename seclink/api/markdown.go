@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"html/template"
 	"regexp"
 	"strings"
 
@@ -35,7 +34,7 @@ func parseMarkdownFile(content []byte) (Page, error) {
 		Slug:                    slug,
 		Parent:                  parent,
 		Description:             description,
-		Content:                 template.HTML(htmlContent),
+		Content:                 htmlContent,
 		Headers:                 headers,
 		MetaDescription:         metaDescriptionStr,
 		MetaPropertyTitle:       metaPropertyTitleStr,
@@ -57,7 +56,7 @@ func extractHeaders(content []byte) []string {
 	return headers
 }
 
-func mdToHTML(md []byte) []byte {
+func mdToHTML(md []byte) string {
 	extensions := parser.CommonExtensions | parser.AutoHeadingIDs
 	parser := parser.NewWithExtensions(extensions)
 
@@ -70,7 +69,7 @@ func mdToHTML(md []byte) []byte {
 
 	output := markdown.Render(doc, renderer)
 
-	return output
+	return string(output)
 }
 
 func parseMetadata(metadata string) (
