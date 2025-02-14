@@ -27,12 +27,23 @@ func init() {
 
 func Serve() error {
 	l := log.Get()
+
+	// Init the db
 	db := db.NewSeclinkDb()
-	err := db.Start(false, false)
+	err := db.Start()
 	if err != nil {
 		l.Error().Err(err).Msg("An error occurred opening the database")
 		return err
 	}
+
+	// Migrate the db
+	err = db.Migrate()
+	if err != nil {
+		l.Error().Err(err).Msg("An error occurred migrating the database")
+		return err
+	}
+
+	// Init the api
 	api := api.NewSeclinkApi(db)
 	err = api.Start()
 	if err != nil {

@@ -1,14 +1,19 @@
 package api
 
 import (
+	"archive/zip"
+	"context"
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"seclink/db"
 	"seclink/log"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -21,11 +26,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+const mdName = "page.md"
+
 //go:embed resources/*
 var res embed.FS
 
-type SCreateLink struct {
-	Filepath  string        `json:"path"`
+type CreateLinkParams struct {
+	PostName  string        `json:"post_name"`
 	TtlString string        `json:"ttl"`
 	Ttl       time.Duration `json:"-"`
 }
@@ -52,10 +59,16 @@ func (a *SSeclinkApi) Start() error {
 	app.Use(fiberzerolog.New(fiberzerolog.Config{
 		Logger: &l,
 	}))
+	app.Use("/static", filesystem.New(filesystem.Config{
+		Root:       httpFS,
+		PathPrefix: "resources/static",
+		Browse:     true,
+	}))
 	app.Use(recover.New())
-	app.Get("/links/:id", a.GetLink)
+	app.Use("/links", a.GetLink)
 
 	// Private admin API and port
+
 	// TODO: Make the BodyLimit in MB a configurable option
 	admin := fiber.New(fiber.Config{BodyLimit: 2000 * 1024 * 1024}) // Ensure we load the HTML template rendering engine
 	admin.Use("/static", filesystem.New(filesystem.Config{
@@ -69,7 +82,8 @@ func (a *SSeclinkApi) Start() error {
 	app.Use(recover.New())
 	admin.Get("/admin", a.AdminUI)
 	admin.Post("/api/v1/links/share", a.CreateLink)
-	admin.Post("/api/v1/files/upload", a.UploadFile)
+	// admin.Post("/api/v1/files/upload", a.UploadFile)
+	admin.Post("/api/v1/pages/upload", a.UploadPage)
 
 	// Start admin port listening, as a goroutine
 	go admin.Listen(fmt.Sprintf("0.0.0.0:%d", viper.GetInt("server.adminport")))
@@ -88,53 +102,126 @@ func (a *SSeclinkApi) Start() error {
 func (a *SSeclinkApi) GetLink(c *fiber.Ctx) error {
 	l := log.Get()
 
-	if id := c.Params("id"); id != "" {
+	// We need to parse the incoming route
+	// and then use that as the ID for the link in the database
 
-		// See if the ID exists in the database
-		filePath, err := a.db.Get([]byte(id))
-		if err != nil {
-			l.Error().
-				Err(err).
-				Str("ID", id).
-				Msg("Could not find id in database")
-			return err
-		}
-
-		// Check the file exists
-		absoluteFilePath := filepath.Join(a.dataFilesPath, string(filePath))
-		exists, err := pathExists(absoluteFilePath)
-		if err != nil {
-			l.Error().
-				Err(err).
-				Str("ID", id).
-				Str("AbsoluteFilePath", absoluteFilePath).
-				Msg("Error occurred checking if file exists")
-			return err
-		}
-		if !exists {
-			l.Error().
-				Str("ID", id).
-				Str("AbsoluteFilePath", absoluteFilePath).
-				Msg("File does not exist")
-			return err
-		}
-
-		l.Info().Str("AbsoluteFilePath", absoluteFilePath).Str("ID", id).Msg("Downloading file")
-		c.Download(absoluteFilePath, string(filePath))
-
-	} else {
+	splitPath := strings.Split(c.Path(), "/")
+	if len(splitPath) < 3 {
+		err := fmt.Errorf("missing ID")
 		l.Error().
-			Msg("An empty id was provided on the route")
-		return fmt.Errorf("an empty id was provided on the route")
+			Err(err).
+			Msg("Missing ID field")
+		return err
+	}
+	id := splitPath[2]
+
+	// Validate that id exists in the path and is valid
+	if len(id) != 64 || !regexp.MustCompile(`^([A-Za-z0-9]{64})$`).MatchString(id) {
+		err := fmt.Errorf("ID %s is not a valid ID", id)
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Not a valid ID")
+		return err
 	}
 
-	return nil
+	// See if the ID exists in the database
+	getLinkRow, err := a.db.GetLink(id)
+	if err != nil {
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Could not find id in database")
+		return err
+	}
+
+	// Based on the Link.Expires unix epoch, determine if the link has expired or not
+	if time.Now().Unix() > getLinkRow.Link.Expires {
+		err = fmt.Errorf("%s has expired at %d", id, getLinkRow.Link.Expires)
+		l.Error().
+			Err(err).
+			Str("ID", id).
+			Msg("Link has expired")
+
+		// As the link has expired, we want to use a.db.DeleteLink to remove the link
+		err = a.db.DeleteLink(id)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Msg("Could not be deleted from database")
+			return err
+		}
+
+		return err
+	}
+
+	// Determine paths
+	postPath := filepath.Join(viper.GetString("server.datapath"), getLinkRow.Post.Path)
+	mdPath := filepath.Join(postPath, mdName)
+
+	// If length of path segments is only links and the id, and nothing else has been specified then we only want to render the page.md
+	// and serve the html for this file
+	if len(splitPath) == 3 {
+		// Check for page.md file
+		exists, err := pathExists(mdPath)
+		if err != nil || !exists {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Msgf("Could not find %s in %s", mdName, postPath)
+			return err
+		}
+
+		// Read in the markdown file
+		md, err := os.ReadFile(mdPath)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("ID", id).
+				Str("mdPath", mdPath).
+				Msg("Could not read in page")
+			return err
+		}
+
+		// Parse the markdown file
+		page, err := parseMarkdownFile(md)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("mdPath", mdPath).
+				Msg("Failed to parse markdown")
+		}
+
+		// Serve the HTML
+
+		return a.Render(c, RenderPage(page, getLinkRow))
+	} else {
+		// We have an additional path specified, translate this to the file path, if it exists, serve the file
+		strings.Join(splitPath[3:], "/")
+		filePath := filepath.Join(viper.GetString("server.datapath"), getLinkRow.Post.Path, strings.Join(splitPath[3:], "/"))
+		l.Info().
+			Str("filePath", filePath).
+			Msg("Attempting to serve file")
+		exists, err := pathExists(filePath)
+		if err != nil || !exists {
+			l.Error().
+				Err(err).
+				Str("filePath", filePath).
+				Msg("Could not find file")
+			return err
+		}
+
+		// Serve the file
+		return c.SendFile(filePath)
+	}
+
 }
 
 func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 	l := log.Get()
 
-	var input SCreateLink
+	var input CreateLinkParams
 	var err error
 
 	if err := c.BodyParser(&input); err != nil {
@@ -154,31 +241,45 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 
 	l.Trace().Interface("input", input).Msg("Input")
 
-	absoluteFilePath := filepath.Join(a.dataFilesPath, input.Filepath)
+	post, err := a.db.GetPost(input.PostName)
+	if err != nil {
+		l.Error().Err(err).Str("PostName", input.PostName).Msg("Post does not exist in DB or error finding record")
+		return err
+	} else {
+		l.Info().Str("PostName", post.Name).Msg("Found Post in DB")
+	}
+
+	absoluteFilePath := filepath.Join(viper.GetString("server.datapath"), input.PostName)
 	exists, err := pathExists(absoluteFilePath)
 	if err != nil {
-		l.Error().Err(err).Str("FilePath", input.Filepath).Msg("An error occurred determining if filepath exists")
+		l.Error().Err(err).Str("FilePath", absoluteFilePath).Msg("Post file path does not exist")
 		return err
 	}
 
 	if exists {
 		id, err := GenerateLink()
 		if err != nil {
-			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred generating a random ID")
+			l.Error().Err(err).Str("PostName", post.Name).Str("id", id).Msg("An error occurred generating a random ID")
 			return err
 		}
 		l.Info().Str("id", id).Msg("Generated ID")
 
-		err = a.db.Set([]byte(id), []byte(input.Filepath), input.Ttl)
+		// Formulate the expires time
+		expiresAt := time.Now().Local().Add(input.Ttl)
+		expiresAtUnixEpoch := expiresAt.Unix()
+
+		link := db.Link{ID: id, Expires: expiresAtUnixEpoch, PostName: post.Name}
+
+		err = a.db.CreateLink(link)
 
 		if err != nil {
-			l.Error().Err(err).Str("FilePath", input.Filepath).Str("ID", id).Msg("An error occurred inserting a record")
+			l.Error().Err(err).Interface("link", link).Msg("An error occurred creating the link record in the database")
 			return err
 		}
 
 	} else {
-		l.Error().Err(err).Str("FilePath", input.Filepath).Str("AbsoluteFilePath", absoluteFilePath).Msg("Filepath does not exist")
-		return fmt.Errorf("file does not exist")
+		l.Error().Err(err).Str("PostName", post.Name).Str("AbsoluteFilePath", absoluteFilePath).Msg("Path for post does not exist")
+		return fmt.Errorf("post path does not exist")
 	}
 
 	data, err := a.GetUiData()
@@ -187,7 +288,7 @@ func (a *SSeclinkApi) CreateLink(c *fiber.Ctx) error {
 		return err
 	}
 
-	return a.Render(c, AdminSharedLinksTable(data.SharedLinks))
+	return a.Render(c, AdminLinksTable(data.Links))
 
 }
 
@@ -212,15 +313,6 @@ func (a *SSeclinkApi) GetFileList() ([]SFile, error) {
 	return files, err
 }
 
-// Get active links list
-func (a *SSeclinkApi) GetLinks() ([]db.SSharedLink, error) {
-	results, err := a.db.GetAllLinks()
-	if err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
 // If link exists and has not expired then return downloaded file
 func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 	l := log.Get()
@@ -234,7 +326,7 @@ func (a *SSeclinkApi) AdminUI(c *fiber.Ctx) error {
 		return err
 	}
 
-	return a.Render(c, AdminUiPage(data.SharedLinks, data.Files))
+	return a.Render(c, AdminUiPage(data.Links, data.Posts))
 }
 
 func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
@@ -280,32 +372,160 @@ func (a *SSeclinkApi) UploadFile(c *fiber.Ctx) error {
 		return err
 	}
 
-	return a.Render(c, AdminFileTable(data.Files))
+	return a.Render(c, AdminPostTable(data.Posts))
+}
+
+func (a *SSeclinkApi) UploadPage(c *fiber.Ctx) error {
+	l := log.Get()
+
+	l.Trace().Msg("UploadFile called")
+
+	file, err := c.FormFile("binaryFile")
+	if err != nil {
+		l.Error().Err(err).Msg("Unable to load form data")
+		return err
+	}
+
+	// Check is a zip file, required for page upload
+	if filepath.Ext(file.Filename) == ".zip" {
+		l.Info().Str("Filename", file.Filename).Msg("File extension zip is valid")
+	} else {
+		err := fmt.Errorf("must provide a zip file")
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("File extension zip is not valid")
+		return err
+	}
+
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "page-upload")
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("Error creating temporary directory")
+	} else {
+		l.Info().Err(err).Str("Filename", file.Filename).Str("tempDir", tempDir).Msg("Successfully created temporary directory")
+	}
+	defer os.RemoveAll(tempDir)
+
+	savePath := filepath.Join(tempDir, file.Filename)
+
+	// Check for errors:
+	if err == nil {
+		l.Info().
+			Str("savePath", savePath).
+			Str("Filename", file.Filename).
+			Msg("file upload successful, saving file")
+		// 👷 Save file to root directory:
+		err = c.SaveFile(file, savePath)
+		if err != nil {
+			l.Error().
+				Err(err).
+				Str("savePath", savePath).
+				Str("Filename", file.Filename).
+				Msg("failed to save file to the save path")
+			return err
+		}
+	} else {
+		l.Error().
+			Err(err).
+			Str("Filename", file.Filename).
+			Msg("failed to upload file")
+		return err
+	}
+
+	// Extract the ZIP file, read markdown metadata
+	extractPath := filepath.Join(tempDir, "extract")
+	err = Unzip(savePath, extractPath)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("extractPath", extractPath).Str("zipFile", savePath).Msg("Error unzipping file")
+		return err
+	}
+
+	l.Info().Str("Filename", file.Filename).Str("extractPath", extractPath).Str("zipFile", savePath).Msg("Successfull unzip")
+
+	// Check the page.md file exists at a minimum this must exist
+	mdPath := filepath.Join(extractPath, mdName)
+	if exists, err := pathExists(mdPath); err != nil || !exists {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("No %s file was found within zip", mdName)
+	}
+
+	l.Info().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file was found, proceeding to process metadata", mdName)
+
+	// Process metadata
+
+	// Read in md file
+	mdData, err := os.ReadFile(mdPath)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file could not be read", mdName)
+	}
+
+	// Parse the file
+	Page, err := parseMarkdownFile(mdData)
+	if err != nil {
+		l.Error().Err(err).Str("Filename", file.Filename).Str("mdPath", mdPath).Msgf("%s file could not be parsed successfully, check format", mdName)
+	}
+
+	// Check that we have a slug name in the metadata, this will be the page name reference, folder name, and unique ID in the database
+	if Page.Slug != "" {
+
+		// Determine data path for page
+		pagePath := filepath.Join(viper.GetString("server.datapath"), Page.Slug)
+
+		// Re-unzip the page data in the page folder
+		err := Unzip(savePath, pagePath)
+		if err != nil {
+			l.Error().Err(err).Str("Filename", file.Filename).Str("pagePath", pagePath).Msg("Failed to unzip to page data directory")
+			return err
+		}
+
+		// Create an entry in the database for the page
+		// TODO: Check there isnt an existing record and dont do anything if there already is/update path
+		err = a.db.CreatePost(db.Post{Name: Page.Slug, Path: Page.Slug})
+		if err != nil {
+			l.Error().Err(err).Str("Filename", file.Filename).Str("pagePath", pagePath).Msg("Failed to create database record for page")
+			return err
+		}
+	} else {
+		err = fmt.Errorf("slug metadata must be provided and not blank")
+		l.Error().Err(err).Str("Filename", file.Filename).Msg("Missing slug metadata")
+		return err
+	}
+
+	// Return success
+	err = c.SendString("Page upload successful!")
+	if err != nil {
+		return err
+	}
+
+	// Update post table
+	data, err := a.GetUiData()
+	if err != nil {
+		l.Error().Err(err).Msg("failed to get required ui data")
+		return err
+	}
+
+	return a.Render(c, AdminPostTable(data.Posts))
 }
 
 // Get all current data on the app, used for rendering UI pages
-func (a *SSeclinkApi) GetUiData() (SUiData, error) {
+func (a *SSeclinkApi) GetUiData() (UiData, error) {
 
 	l := log.Get()
 
-	sharedLinks, err := a.GetLinks()
+	ctx := context.Background()
+
+	links, err := a.db.Queries().GetAllLinks(ctx)
 	if err != nil {
 		l.Error().Err(err).Msg("failed to get links from db")
-		return SUiData{}, err
+		return UiData{}, err
 	}
 
-	files, err := a.GetFileList()
+	posts, err := a.db.Queries().GetAllPosts(ctx)
 	if err != nil {
-		l.Error().
-			Err(err).
-			Str("datapath", a.dataFilesPath).
-			Msg("Could not list files in data path")
-		return SUiData{}, err
+		l.Error().Err(err).Msg("failed to get posts from db")
+		return UiData{}, err
 	}
 
-	return SUiData{
-		SharedLinks: sharedLinks,
-		Files:       files,
+	return UiData{
+		Links: links,
+		Posts: posts,
 	}, nil
 
 }
@@ -326,6 +546,8 @@ func NewSeclinkApi(db db.ISeclinkDb) ISeclinkApi {
 	}
 }
 
+// Helper functions
+
 // Path exists
 func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
@@ -336,4 +558,72 @@ func pathExists(path string) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+// Extract zip
+func Unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			panic(err)
+		}
+	}()
+
+	err = os.MkdirAll(dest, 0700)
+	if err != nil {
+		return err
+	}
+
+	// Closure to address file descriptors issue with all the deferred .Close() methods
+	extractAndWriteFile := func(f *zip.File) error {
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := rc.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		path := filepath.Join(dest, f.Name)
+
+		// Check for ZipSlip (Directory traversal)
+		if !strings.HasPrefix(path, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", path)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(path, f.Mode())
+		} else {
+			os.MkdirAll(filepath.Dir(path), f.Mode())
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if err := f.Close(); err != nil {
+					panic(err)
+				}
+			}()
+
+			_, err = io.Copy(f, rc)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	for _, f := range r.File {
+		err := extractAndWriteFile(f)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
